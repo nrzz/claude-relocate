@@ -158,3 +158,16 @@ test("nothing the renderers print has an emoji in it", () => {
   assert.ok(!emoji.test(renderMoved(moved({ warnings: ["x"], incomplete: true }), { c: color })));
   assert.ok(!emoji.test(renderVerify({ ok: false, checks: [{ level: "fail", message: "x" }] }, { c: color })));
 });
+
+test("renderStatus keeps the columns apart for a long shell name (powershell)", () => {
+  const s = {
+    thisTerminal: { variable: null, configDir: "/h/.claude", source: "default" },
+    configDir: { path: "/h/.claude", exists: true, isLink: false, resolvesTo: "/h/.claude" },
+    claudeJson: { path: "/h/.claude.json", exists: true, inside: false, size: 10 },
+    moved: null, links: [], profiles: [],
+    newTerminals: [{ name: "bash", value: "/new", from: "/h/.bashrc" }, { name: "powershell", value: "/new", from: "/h/profile.ps1" }],
+  };
+  const out = renderStatus(s, { c: plain });
+  assert.match(out, /^ {2}bash {8}CLAUDE_CONFIG_DIR=\/new {2}\(\/h\/\.bashrc\)$/m);
+  assert.match(out, /^ {2}powershell {2}CLAUDE_CONFIG_DIR=\/new {2}\(\/h\/profile\.ps1\)$/m);
+});

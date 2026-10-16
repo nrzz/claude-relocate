@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
-import { TIME_TOLERANCE_MS, compareSnapshots, copyTree, fileRow, makeLink, newTargetFor, removeIfEmpty, removeTree, retargetLinks, snapshot } from "../src/walk.mjs";
+import { TIME_TOLERANCE_MS, compareSnapshots, copyTree, fileRow, makeLink, newTargetFor, pruneEmpty, removeEmptyParents, removeIfEmpty, removeTree, retargetLinks, snapshot } from "../src/walk.mjs";
 import { IS_WIN, lexists, put, tmpDir, tree } from "./helpers.mjs";
 
 const T0 = Date.parse("2026-08-01T12:34:56.789Z");
@@ -293,4 +293,40 @@ test("fileRow describes a file, a link and nothing", () => {
   assert.equal(fileRow(path.join(dir, "f")).size, 3);
   assert.deepEqual([fileRow(path.join(dir, "l")).t, fileRow(path.join(dir, "l")).target], ["l", "somewhere"]);
   assert.equal(fileRow(path.join(dir, "none")), null);
+});
+
+test("pruneEmpty removes a tree of empty folders, and stops at a file or a link", () => {
+  const dir = tmpDir();
+  fs.mkdirSync(path.join(dir, "a", "b", "c"), { recursive: true });
+  fs.mkdirSync(path.join(dir, "a", "d"));
+  assert.equal(pruneEmpty(path.join(dir, "a")), true);
+  assert.ok(!lexists(path.join(dir, "a")));
+  put(path.join(dir, "x", "y", "file.txt"), "x");
+  fs.mkdirSync(path.join(dir, "x", "empty"));
+  assert.equal(pruneEmpty(path.join(dir, "x")), false, "a file keeps its folders");
+  assert.ok(lexists(path.join(dir, "x", "y", "file.txt")));
+  assert.ok(!lexists(path.join(dir, "x", "empty")), "but the empty folder beside it goes");
+  const target = tmpDir();
+  fs.mkdirSync(path.join(dir, "l"));
+  fs.symlinkSync(target, path.join(dir, "l", "link"), IS_WIN ? "junction" : "dir");
+  assert.equal(pruneEmpty(path.join(dir, "l")), false, "a link is something");
+  assert.ok(lexists(target), "and what it points to is untouched");
+  assert.equal(pruneEmpty(path.join(dir, "nothing-here")), false);
+  assert.equal(pruneEmpty(path.join(dir, "x", "y", "file.txt")), false, "a file is not a folder");
+});
+
+test("removeEmptyParents walks up from a folder, removing the empty ones, and never the one it was told to stop at", () => {
+  const dir = tmpDir();
+  const base = path.join(dir, "cache", "claude");
+  fs.mkdirSync(path.join(base, "plugins", "cache"), { recursive: true });
+  removeEmptyParents(path.join(base, "plugins", "cache"), base);
+  assert.ok(!lexists(path.join(base, "plugins")), "plugins/cache and plugins are gone");
+  assert.ok(lexists(base), "the stop is still there");
+  put(path.join(base, "plugins", "keep.txt"), "x");
+  fs.mkdirSync(path.join(base, "plugins", "sub"));
+  removeEmptyParents(path.join(base, "plugins", "sub"), base);
+  assert.ok(!lexists(path.join(base, "plugins", "sub")) && lexists(path.join(base, "plugins", "keep.txt")), "it stops at the first folder with something in it");
+  removeEmptyParents(path.join(dir, "elsewhere"), base);
+  removeEmptyParents(path.join(dir), base);
+  assert.ok(lexists(dir), "a folder outside the stop's tree is not touched");
 });

@@ -148,7 +148,8 @@ export function renderStatus(s, { c }) {
   for (const l of s.links) lines.push(`link            ${l.path} -> ${l.target}  (${l.resolves ? "resolves" : l.isLink ? "does not resolve" : "is not a link now"})`);
   lines.push("");
   lines.push("A terminal started now will have:");
-  for (const r of s.newTerminals) lines.push(`  ${pad(r.name, 9)}${r.value !== null ? `CLAUDE_CONFIG_DIR=${r.value}` : "CLAUDE_CONFIG_DIR not set"}  (${r.from})`);
+  const nameWidth = Math.max(9, ...s.newTerminals.map((r) => r.name.length + 2));
+  for (const r of s.newTerminals) lines.push(`  ${pad(r.name, nameWidth)}${r.value !== null ? `CLAUDE_CONFIG_DIR=${r.value}` : "CLAUDE_CONFIG_DIR not set"}  (${r.from})`);
   if (!s.newTerminals.length) lines.push("  nothing from claude-relocate");
   for (const p of s.profiles) for (const o of p.others) lines.push(`${c.yellow("note")}  ${p.file} line ${o.line} also sets CLAUDE_CONFIG_DIR: ${o.text}`);
   lines.push(`This terminal: ${s.thisTerminal.variable !== null ? `CLAUDE_CONFIG_DIR=${s.thisTerminal.variable}` : "CLAUDE_CONFIG_DIR is not set"}.`);

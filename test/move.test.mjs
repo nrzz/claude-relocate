@@ -6,7 +6,7 @@ import { readManifest } from "../src/manifest.mjs";
 import { blockValue } from "../src/profiles.mjs";
 import { INCOMPLETE } from "../src/move.mjs";
 import { readUserEnv, writeUserEnv } from "../src/winenv.mjs";
-import { IS_WIN, diffTrees, everything, exdev, lexists, noFileLinks, put, read, run, runJson, seedConfig, secondDriveAt, tmpDir, tree, world } from "./helpers.mjs";
+import { IS_WIN, diffTrees, everything, exdev, lexists, noFileLinks, otherDriveDir, put, read, run, runJson, seedConfig, secondDriveAt, tmpDir, tree, world } from "./helpers.mjs";
 
 const LINUX = IS_WIN ? "linux" : process.platform;
 const MANIFEST = "relocate-manifest.json";
@@ -503,4 +503,26 @@ test("a PowerShell profile keeps its byte-order mark and its CRLF line endings t
   const u = await runJson(["undo", "--yes"], { ...w, env: { ...w.env, CLAUDE_CONFIG_DIR: w.dest } }, { sys: w.sys() });
   assert.equal(u.code, 0, u.all);
   assert.equal(fs.readFileSync(file, "utf8"), original);
+});
+
+const OTHER_DRIVE = otherDriveDir();
+
+test("move to a really different drive: planned as a copy, copied, checked, the original removed; undo copies it back (when this machine has a second drive)", { skip: !OTHER_DRIVE && "this machine has no second writable drive" }, async () => {
+  const w = fresh("mv36");
+  const dest = path.join(OTHER_DRIVE, "Claude data", "cfg");
+  const before = everything(w);
+  const treeBefore = tree(w.cfg);
+  const plan = await runJson(["plan", "--to", dest], w, { sys: w.sys() });
+  assert.equal(plan.json.destination.method, "copy", "the system says these are two drives");
+  const r = await moveJson(["--to", dest, "--yes"], w);
+  assert.equal(r.code, 0, r.all);
+  assert.equal(r.json.method, "copy");
+  assert.ok(!lexists(w.cfg));
+  assert.deepEqual(diffTrees(treeBefore, tree(dest), { ignore: [MANIFEST] }), []);
+  const u = await runJson(["undo", "--yes"], { ...w, env: { ...w.env, CLAUDE_CONFIG_DIR: dest } }, { sys: w.sys() });
+  assert.equal(u.code, 0, u.all);
+  assert.equal(u.json.method, "copy");
+  assert.ok(!lexists(dest) && !lexists(path.dirname(dest)), "and the folders the move made on the way are gone");
+  const after = everything(w);
+  assert.deepEqual(diffTrees(before.base, after.base, { ignore: [] }), []);
 });

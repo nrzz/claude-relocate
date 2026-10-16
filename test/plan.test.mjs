@@ -64,7 +64,7 @@ test("plan --json is one document with the fields the setup page reads", async (
   assert.equal(j.destination.config, w.dest);
   assert.equal(j.destination.requested, "to");
   assert.deepEqual(Object.keys(j.space[0]).sort(), ["copy", "freeBytes", "needBytes", "ok", "path", "paths"]);
-  assert.deepEqual(Object.keys(j.env).sort(), ["profiles", "registry", "skipped", "variable"]);
+  assert.deepEqual(Object.keys(j.env).sort(), ["notWritten", "profiles", "registry", "skipped", "variable"]);
   assert.equal(r.err, "");
 });
 
@@ -400,4 +400,21 @@ test("the text for a plan with a problem lists it after the table, with a cross,
   const r = await run(["plan", "--to", w.dest], w);
   assert.equal(r.code, 1);
   assert.match(r.out, /^✗ The destination .* exists and is not empty/m);
+});
+
+test("a folder an earlier move left links to is moved on with a warning that the links will lead nowhere", async () => {
+  const w = seedConfig(world("plan35", { shell: "" }));
+  const first = await run(["move", "--to", w.dest, "--link", "--yes"], w, { sys: w.sys() });
+  assert.equal(first.code, 0, first.all);
+  const atDest = { ...w, env: { ...w.env, CLAUDE_CONFIG_DIR: w.dest } };
+  const third = path.join(w.base, "third");
+  const m = buildPlan({ env: atDest.env, cwd: w.base, sys: w.sys(), opts: { to: third } });
+  assert.deepEqual(m.problems, []);
+  assert.equal(m.origin.relocated, true);
+  const note = m.warnings.find((x) => /^An earlier move left a link that leads here/.test(x));
+  assert.ok(note, m.warnings.join("\n"));
+  assert.ok(note.includes(w.cfg));
+  assert.match(note, /It will lead nowhere once this folder moves: run undo first, or point it at the new place yourself\.$/);
+  const plain = seedConfig(world("plan35b"));
+  assert.ok(!plan(plain, { to: plain.dest }).warnings.some((x) => /earlier move/.test(x)));
 });

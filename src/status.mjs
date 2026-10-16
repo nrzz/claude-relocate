@@ -38,7 +38,7 @@ export function runStatus({ env, cwd, sys }) {
   }
   // What a shell started now will have: the user environment on Windows, then the profile of that shell.
   const rows = [];
-  if (out.windowsEnvironment) rows.push({ name: "windows", value: out.windowsEnvironment.value, from: `${out.windowsEnvironment.key}: the user environment, seen by cmd, PowerShell, Git Bash and anything started from Explorer` });
+  if (out.windowsEnvironment) rows.push({ name: "windows", value: out.windowsEnvironment.value, from: `${out.windowsEnvironment.key}: the user environment, where programs started from the Start menu or Explorer get their variables` });
   const byShell = new Map();
   for (const p of profiles) {
     if (!byShell.has(p.shell)) byShell.set(p.shell, []);

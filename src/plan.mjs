@@ -5,6 +5,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { configInUse, xdgDirs } from "./env.mjs";
 import { CLAUDE_JSON, KIND_LABEL, KINDS, MANIFEST_NAME, inventory, measure, scanSettings } from "./inventory.mjs";
+import { readManifest } from "./manifest.mjs";
 import { planProfiles } from "./profiles.mjs";
 import { MiB, count, isEmptyDir, isInside, nearestExisting, realLoose, resolveFolder, samePath, size, statOf } from "./util.mjs";
 import { splitParts, splitSupported } from "./xdg.mjs";
@@ -99,6 +100,12 @@ export function buildPlan({ env, cwd, sys, opts = {} }) {
     model.total = inv.total;
     model.kinds = KINDS.map((kind) => ({ kind, label: KIND_LABEL[kind], ...inv.kinds[kind], destination: "" }));
     for (const e of inv.entries) if (e.type === "link" && e.kind !== "claudeJson") model.warnings.push(`${e.name} in the config folder is a link${e.target ? ` to ${e.target}` : ""}: it is moved as a link, and what it points to stays where it is.`);
+    if (model.origin.relocated) {
+      // links an earlier move left at the place this folder came from lead here, and will lead nowhere once it moves on
+      const earlier = readManifest(path.join(cfg.dir, MANIFEST_NAME));
+      const left = earlier.ok ? earlier.manifest.links.filter((l) => l.purpose !== "xdg" && typeof l.path === "string" && (statOf(l.path) || { isSymbolicLink: () => false }).isSymbolicLink()) : [];
+      if (left.length) model.warnings.push(`An earlier move left ${left.length === 1 ? "a link that leads" : `${left.length} links that lead`} here (${left.map((l) => l.path).join(", ")}). ${left.length === 1 ? "It" : "They"} will lead nowhere once this folder moves: run undo first, or point ${left.length === 1 ? "it" : "them"} at the new place yourself.`);
+    }
     if (model.references.length) {
       model.warnings.push(`settings.json or settings.local.json spell the config folder's path in ${model.references.length === 1 ? "1 place" : `${model.references.length} places`} (hooks or the status line). They stop working after a move unless you use --link or change them.`);
     }
