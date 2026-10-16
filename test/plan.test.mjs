@@ -418,3 +418,18 @@ test("a folder an earlier move left links to is moved on with a warning that the
   const plain = seedConfig(world("plan35b"));
   assert.ok(!plan(plain, { to: plain.dest }).warnings.some((x) => /earlier move/.test(x)));
 });
+
+test("a working folder inside the config folder is a warning for plan and a refusal for move (a folder in use cannot be renamed on Windows)", async () => {
+  const w = seedConfig(world("plan36", { shell: "" }));
+  const inside = path.join(w.cfg, "projects");
+  const p = await runJson(["plan", "--to", w.dest], w, { cwd: inside });
+  assert.equal(p.code, 0, p.all);
+  assert.ok(p.json.warnings.some((x) => /^The working folder .* is inside the config folder\. Change to another folder first\.$/.test(x)));
+  const before = everything(w);
+  const m = await runJson(["move", "--to", w.dest, "--yes"], w, { cwd: inside, sys: w.sys() });
+  assert.equal(m.code, 1);
+  assert.equal(m.json.problems[0].code, "working-folder-inside");
+  assert.deepEqual(everything(w), before);
+  const ok = await runJson(["move", "--to", w.dest, "--yes"], w, { cwd: w.base, sys: w.sys() });
+  assert.equal(ok.code, 0, ok.all);
+});

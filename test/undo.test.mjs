@@ -390,3 +390,14 @@ test("undo json carries the steps, the manifest and what became of the profiles"
   assert.equal(r.json.origin, w.cfg);
   assert.equal(r.json.destination, w.dest);
 });
+
+test("undo is refused while the working folder is inside the folder it would move back", async () => {
+  const w = fresh("un30");
+  await mv(w, ["--to", w.dest]);
+  const before = everything(w);
+  const r = await runJson(["undo", "--yes"], atDest(w), { cwd: path.join(w.dest, "projects"), sys: w.sys() });
+  assert.equal(r.code, 1);
+  assert.equal(r.json.problems[0].code, "working-folder-inside");
+  assert.deepEqual(everything(w), before);
+  assert.equal((await undoJson(atDest(w))).code, 0);
+});

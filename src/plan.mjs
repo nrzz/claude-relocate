@@ -123,6 +123,13 @@ export function buildPlan({ env, cwd, sys, opts = {} }) {
     else if (procs.processes.length) model.problems.push(problem("claude-running", `Claude Code or the Claude desktop app is running: ${describeProcesses(procs.processes)}. Close it, then run this again. (--ignore-running skips this check.)`));
   }
 
+  // --- the working folder: a folder some program is standing in cannot be renamed on Windows, and a shell left in a moved folder is lost ---
+  if (model.origin.exists && isInside(realLoose(cfg.dir), realLoose(cwd))) {
+    const text = `The working folder ${cwd} is inside the config folder. Change to another folder first.`;
+    if (opts.forMove) model.problems.push(problem("working-folder-inside", text));
+    else model.warnings.push(text);
+  }
+
   // --- the profile files that already set CLAUDE_CONFIG_DIR some other way ---
   // (read by `verify` and `status`; the plan only needs the files it would write)
 

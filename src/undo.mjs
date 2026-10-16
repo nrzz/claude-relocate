@@ -13,7 +13,7 @@ import { manifestFile, readManifest, writeManifest } from "./manifest.mjs";
 import { describeProcesses } from "./plan.mjs";
 import { readProfiles, removeProfile } from "./profiles.mjs";
 import { COPY_INSTEAD, VerifyError, copyChildren, moveEntry, moveFile } from "./transfer.mjs";
-import { MiB, UserError, exists, isEmptyDir, realLoose, samePath, size, statOf } from "./util.mjs";
+import { MiB, UserError, exists, isEmptyDir, isInside, realLoose, samePath, size, statOf } from "./util.mjs";
 import { compareSnapshots, makeLink, pruneEmpty, removeEmptyParents, removeTree, retargetLinks, snapshot } from "./walk.mjs";
 import { readUserEnv, removeUserEnv, writeUserEnv } from "./winenv.mjs";
 
@@ -81,6 +81,7 @@ export function runUndo({ env, cwd, sys, opts, log = () => {} }) {
     if (!p.ok) problems.push(problem("process-check-failed", `Could not check whether Claude Code is running (${p.error}). Close Claude Code and the Claude desktop app, then use --ignore-running.`));
     else if (p.processes.length) problems.push(problem("claude-running", `Claude Code or the Claude desktop app is running: ${describeProcesses(p.processes)}. Close it, then run this again. (--ignore-running skips this check.)`));
   }
+  if (isInside(realLoose(B), realLoose(cwd))) problems.push(problem("working-folder-inside", `The working folder ${cwd} is inside ${B}. Change to another folder first.`));
   const stB = statOf(B);
   if (!stB || !stB.isDirectory()) problems.push(problem("destination-missing", `${B}, where the manifest says the config folder went, is not a folder any more.`));
   const stA = statOf(A);
