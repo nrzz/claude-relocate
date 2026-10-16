@@ -70,7 +70,14 @@ export function moveEntry(src, dst, sys, ctx) {
   copyAndVerify(src, dst, ctx);
   // the original may have changed while the copy was made (a program started meanwhile): the copy then lacks that,
   // and the original must stay as it is
-  const again = compareSnapshots(before, snapshotAny(src));
+  let again;
+  try {
+    again = compareSnapshots(before, snapshotAny(src));
+  } catch (e) {
+    // the source cannot be listed again (a file went away meanwhile): the copy is taken away, and nothing was removed
+    try { removeTree(dst); } catch { /* best effort: the copy was ours */ }
+    throw e;
+  }
   if (!again.ok) {
     try { removeTree(dst); } catch { /* best effort: the copy was ours */ }
     throw new UserError(`${src} changed while it was being copied (${again.count} difference${again.count === 1 ? "" : "s"}, the first at ${again.mismatches[0].path || path.basename(src)}), so nothing was removed from it. Close Claude Code and the Claude desktop app, then run this again.`, "changed-during-copy");

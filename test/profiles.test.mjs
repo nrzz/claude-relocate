@@ -429,3 +429,28 @@ test("Windows PowerShell 5.1 brings back a non-ASCII folder name from an existin
     assert.equal(r.stdout, value);
   }
 });
+
+test("a byte-order mark at the top of a file is not part of the block: findBlock starts after it", () => {
+  const body = `${START}\nexport CLAUDE_CONFIG_DIR='/x'\n${END}\n`;
+  const found = findBlock(`\uFEFF${body}`);
+  assert.deepEqual([found.start, found.text], [1, body]);
+  assert.equal(findBlock(body).start, 0);
+});
+
+test("two moves to non-ASCII folders into a PowerShell profile that holds only the block, then two undos: the profile is as it was, each undo takes out only its own mark (found by review)", () => {
+  const w = world("psbom5");
+  const file = path.join(w.home, "p.ps1");
+  put(file, "");
+  const first = ["D:", "Caf\u00e9"].join(path.sep);
+  const second = ["E:", "Th\u00e9"].join(path.sep);
+  const p = { shell: "powershell", syntax: "powershell", file };
+  const r1 = writeProfile(p, first, { home: w.home });
+  const r2 = writeProfile(p, second, { home: w.home });
+  assert.deepEqual([r1.markAdded, r2.markAdded], [true, false], "the second move finds the mark the first one put there");
+  assert.equal(removeProfile(r2, {}).removed, true);
+  const between = fs.readFileSync(file, "utf8");
+  assert.ok(between.startsWith("\uFEFF"), "the first move's mark stays while its block does");
+  assert.equal(blockValue(between, "powershell"), first);
+  assert.equal(removeProfile(r1, {}).removed, true);
+  assert.equal(fs.readFileSync(file, "utf8"), "");
+});

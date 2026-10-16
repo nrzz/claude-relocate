@@ -500,3 +500,36 @@ test("undo puts the environment back even when a folder the move made cannot be 
   assert.equal(read(w.home, ".bashrc"), "# mine\n", "the block is out of the profile");
   assert.ok(lexists(path.join(w.cfg, "settings.json")));
 });
+
+test("undo's copy back stops, takes its copy away again and removes nothing when the new folder changed while it was copied (found by review)", async () => {
+  const w = fresh("un26");
+  const over = { rename: exdev, drive: secondDriveAt(w.dest) };
+  assert.equal((await mv(w, ["--to", w.dest], over)).code, 0);
+  const copied = [];
+  const copyFile = (a, b, flags) => { fs.copyFileSync(a, b, flags); copied.push(a); if (copied.length === 4) fs.appendFileSync(copied[0], "written by a program that started meanwhile\n"); };
+  const u = await undoJson(atDest(w), ["--yes"], { ...over, copyFile });
+  assert.equal(u.code, 1, u.all);
+  assert.match(u.json.error, /changed while it was being copied back \(1 difference, the first at .+\), so nothing was removed from it\. Close Claude Code and the Claude desktop app, then run undo again\.$/);
+  assert.ok(!lexists(w.cfg), "the partial copy is gone");
+  assert.ok(lexists(path.join(w.dest, "settings.json")) && lexists(path.join(w.dest, MANIFEST)), "everything is still in the new folder, with its manifest");
+  const again = await undoJson(atDest(w), ["--yes"], over);
+  assert.equal(again.code, 0, again.all);
+  assert.ok(lexists(path.join(w.cfg, "settings.json")));
+  assert.match(fs.readFileSync(path.join(w.cfg, path.relative(w.dest, copied[0])), "utf8"), /written by a program that started meanwhile/, "the folder is back with what the other program wrote");
+});
+
+test("undo of --xdg names what the removal of a part from the state folder left, and says the part is whole where it belongs (found by review)", async () => {
+  const w = fresh("un25", { platform: LINUX });
+  put(path.join(w.cfg, "projects", "-work-shop", "locked.txt"), "held open\n");
+  const over = { platform: LINUX, rename: exdev };
+  assert.equal((await mv(w, ["--xdg"], over)).code, 0);
+  const real = fs.rmSync;
+  const holdsLocked = (p) => { const st = fs.lstatSync(p); return st.isDirectory() && !st.isSymbolicLink() ? fs.readdirSync(p).some((n) => holdsLocked(path.join(p, n))) : path.basename(p) === "locked.txt"; };
+  fs.rmSync = (p, o) => { if (String(p).startsWith(w.xdg.state) && lexists(p) && holdsLocked(p)) throw Object.assign(new Error("EBUSY: resource busy or locked, unlink"), { code: "EBUSY" }); return real.call(fs, p, o); };
+  let u;
+  try { u = await undoJson(atDest(w, w.xdg.config), ["--yes"], over); } finally { fs.rmSync = real; }
+  assert.equal(u.code, 1, u.all);
+  assert.deepEqual([u.json.ok, u.json.incomplete], [false, true]);
+  assert.ok(u.json.warnings.some((x) => /Could not remove 1 item \(.*locked\.txt: EBUSY\) from the state folder\. projects is whole in .*; delete what is left by hand\./.test(x)), u.json.warnings.join(" | "));
+  assert.equal(read(w.cfg, "projects", "-work-shop", "locked.txt"), "held open\n", "the part is whole where it belongs");
+});

@@ -132,14 +132,19 @@ function execute(model, opts, sys, env, log, steps) {
       if (COPY_INSTEAD.has(e.code)) return false;
       throw e;
     }
-    // the folder goes back where it came from (links first re-aimed at the old place again)
+    // the folder goes back where it came from, and its links with it
     const renameBack = () => {
       try {
         sys.rename(B, A);
-        retargetLinks(A, B, { from: B, to: A });
+      } catch (err) {
+        warnings.push(`Could not rename ${B} back to ${A} (${err.code || err.message}); everything is in ${B}.`);
+        return;
+      }
+      try {
+        retargetLinks(A, B, { from: B, to: A, skipRelative: true });
         restoreRelativeLinks(A, relativeLinks);
-        if (emptyInTheWay) fs.mkdirSync(B);
-      } catch (err) { warnings.push(`Could not rename ${B} back to ${A} (${err.code || err.message}); everything is in ${B}.`); }
+      } catch (err) { warnings.push(`${A} is back, but a link in it could not be put back as it was (${err.code || err.message}).`); }
+      try { if (emptyInTheWay) fs.mkdirSync(B); } catch { /* it is only the empty folder that was there before */ }
     };
     const same = compareSnapshots(snapA, snapshot(B));
     if (!same.ok) {
@@ -164,6 +169,10 @@ function execute(model, opts, sys, env, log, steps) {
       copyChildren(A, B, { ...ctx, onEntry: (name) => log(`  copying ${name}`) });
       const same = compareSnapshots(snapA, snapshot(B), { rewrite: { from: A, to: B }, ignore: (rel) => rel === INCOMPLETE });
       if (!same.ok) throw new VerifyError(`The copy in ${B} does not match ${A} (${same.count} difference${same.count === 1 ? "" : "s"}, first: ${same.mismatches[0].path}: ${same.mismatches[0].problem}). Nothing in ${A} was changed.`, same.mismatches);
+      // The original may have changed while it was copied (Claude Code started meanwhile): the copy then lacks that.
+      // Nothing else has been changed yet, so the move stops here, with nothing to put back.
+      const nowA = compareSnapshots(snapA, snapshot(A));
+      if (!nowA.ok) throw new UserError(`${A} changed while it was being copied (${nowA.count} difference${nowA.count === 1 ? "" : "s"}, the first at ${nowA.mismatches[0].path}). Nothing was changed. Close Claude Code and the Claude desktop app, then run this again.`, "changed-during-copy");
       fs.rmSync(path.join(B, INCOMPLETE), { force: true });
       fs.utimesSync(B, stA.atimeMs / 1000, stA.mtimeMs / 1000);
     } catch (e) {
@@ -246,7 +255,7 @@ function execute(model, opts, sys, env, log, steps) {
       if (T.mode === "single" && method === "rename") {
         // the folder goes back first; its manifest is put right afterwards (the one an earlier move left, or none)
         sys.rename(B, A);
-        retargetLinks(A, B, { from: B, to: A });
+        retargetLinks(A, B, { from: B, to: A, skipRelative: true });
         restoreRelativeLinks(A, relativeLinks);
         try { if (previousManifest) writeManifest(A, previousManifest); else fs.rmSync(path.join(A, MANIFEST_NAME), { force: true }); } catch { /* the manifest is not data */ }
         if (T.existedBefore) fs.mkdirSync(B);
@@ -267,7 +276,7 @@ function execute(model, opts, sys, env, log, steps) {
         }
         if (!exists(A)) fs.mkdirSync(A);
         // the links that were re-aimed at the new place go back to the old one (a rename does not touch links)
-        try { retargetLinks(A, B, { from: B, to: A }); restoreRelativeLinks(A, relativeLinks); } catch { /* the links are not data */ }
+        try { retargetLinks(A, B, { from: B, to: A, skipRelative: true }); restoreRelativeLinks(A, relativeLinks); } catch { /* the links are not data */ }
         // B goes only when everything has come back: otherwise what is in it is data. Else it holds the empty folders the walk made.
         if (allBack) { if (T.existedBefore) emptyB(); else removeTree(B); }
       }
@@ -366,18 +375,23 @@ function execute(model, opts, sys, env, log, steps) {
   if (manifest.profiles.length || manifest.registry) saveManifest();
 
   // ---- 6. the original goes; a link may take its place ----
-  // The original may have changed while the copy was made (Claude Code started meanwhile): the copy then lacks that,
-  // and the original stays where it is.
+  // The original may also have changed since the copy was checked (the profiles, the user environment and the manifest
+  // took a moment): the copy then lacks that, and the original stays where it is.
   let changedWhileCopying = null;
   if (T.mode === "single" && method === "copy") {
-    const nowA = compareSnapshots(snapA, snapshot(A));
-    const nowJson = jsonOutside ? fileRow(AJ) : null;
-    if (!nowA.ok) changedWhileCopying = `${A} (${nowA.count} difference${nowA.count === 1 ? "" : "s"}, the first at ${nowA.mismatches[0].path})`;
-    else if (jsonOutside && (!nowJson || !rowAJ || nowJson.size !== rowAJ.size || Math.abs(nowJson.mtimeMs - rowAJ.mtimeMs) > TIME_TOLERANCE_MS)) changedWhileCopying = AJ;
+    try {
+      const nowA = compareSnapshots(snapA, snapshot(A));
+      const nowJson = jsonOutside ? fileRow(AJ) : null;
+      if (!nowA.ok) changedWhileCopying = `${A} (${nowA.count} difference${nowA.count === 1 ? "" : "s"}, the first at ${nowA.mismatches[0].path})`;
+      else if (jsonOutside && (!nowJson || !rowAJ || nowJson.size !== rowAJ.size || Math.abs(nowJson.mtimeMs - rowAJ.mtimeMs) > TIME_TOLERANCE_MS)) changedWhileCopying = AJ;
+    } catch (e) {
+      // a file went away while the folder was listed again: that is a change too
+      changedWhileCopying = `${A} (a file in it went away while it was looked at again: ${e.code || e.message})`;
+    }
   }
   if (changedWhileCopying) {
     manifest.originalKept = true;
-    failed(`${changedWhileCopying} changed while it was being copied, so the original was not removed. The copy in ${B} is ${A} as it was when the move began. Close Claude Code and the Claude desktop app, compare the two, and delete the old one by hand when ${B} has everything you want, or run undo.`);
+    failed(`${changedWhileCopying} changed after the copy was checked, so the original was not removed. The copy in ${B} is ${A} as it was when the move began; the old place has newer changes. Close Claude Code and the Claude desktop app, copy what you need from the old place into ${B}, then delete the old place; undo waits until it is gone.`);
   } else if (T.mode === "single" && method === "copy") {
     log(`  removing the original ${A}`);
     const aside = uniquePath(`${A}.claude-relocate-old`);
@@ -389,7 +403,7 @@ function execute(model, opts, sys, env, log, steps) {
       failed(`Could not remove ${describeLeft(stuck)} from ${target}. Everything is in ${B}; delete what is left by hand.`);
     }
     if (jsonOutside) {
-      try { fs.rmSync(AJ, { force: true }); } catch (e) { failed(`Could not remove ${AJ} (${e.code || e.message}).`); }
+      try { fs.rmSync(AJ, { force: true }); } catch (e) { manifest.jsonLeft = true; failed(`Could not remove ${AJ} (${e.code || e.message}). The new folder has it; delete the old one by hand.`); }
     }
   }
   if (opts.link) {

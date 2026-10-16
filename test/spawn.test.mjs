@@ -6,15 +6,20 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { programPath, spawn } from "../src/spawn.mjs";
-import { IS_WIN, tmpDir } from "./helpers.mjs";
+import { writeUserEnv } from "../src/winenv.mjs";
+import { IS_WIN, newKey, tmpDir } from "./helpers.mjs";
 
 const BS = String.fromCharCode(92);
 const win = (...parts) => parts.join(BS);
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 
-test("programPath gives the full path of the four programs that ship with Windows, and leaves every other name as it is", () => {
+test("programPath gives the full path of the six programs that ship with Windows, and leaves every other name as it is", () => {
   const env = { SystemRoot: win("C:", "Windows") };
   const on = { platform: "win32", env, exists: () => true };
+  assert.equal(programPath("cmd.exe", on), win("C:", "Windows", "System32", "cmd.exe"), "the name winenv.mjs uses");
+  assert.equal(programPath("cmd", on), win("C:", "Windows", "System32", "cmd.exe"));
+  assert.equal(programPath("chcp.com", on), win("C:", "Windows", "System32", "chcp.com"), "run by cmd.exe in winenv.mjs");
+  assert.equal(programPath("REG.EXE", on), win("C:", "Windows", "System32", "reg.exe"));
   assert.equal(programPath("reg", on), win("C:", "Windows", "System32", "reg.exe"));
   assert.equal(programPath("tasklist", on), win("C:", "Windows", "System32", "tasklist.exe"));
   assert.equal(programPath("setx", on), win("C:", "Windows", "System32", "setx.exe"));
@@ -44,10 +49,14 @@ test("spawn starts the real program: reg and tasklist on Windows, any program el
   }
 });
 
-test("a reg.exe or tasklist.exe in the working folder is not started (Windows looks in the working folder first unless NoDefaultCurrentDirectoryInExePath is set)", { skip: !IS_WIN && "this is how Windows starts programs" }, (t) => {
+test("a reg.exe, tasklist.exe or cmd.exe in the working folder is not started (Windows looks in the working folder first unless NoDefaultCurrentDirectoryInExePath is set)", { skip: !IS_WIN && "this is how Windows starts programs" }, (t) => {
   const dir = tmpDir("cr-spawn-");
   const system32 = path.join(process.env.SystemRoot || process.env.windir || "", "System32");
-  for (const name of ["reg.exe", "tasklist.exe"]) fs.copyFileSync(path.join(system32, "hostname.exe"), path.join(dir, name)); // a harmless stand-in: with these arguments it prints nothing
+  for (const name of ["reg.exe", "tasklist.exe", "cmd.exe", "chcp.com"]) fs.copyFileSync(path.join(system32, "hostname.exe"), path.join(dir, name)); // a harmless stand-in: with these arguments it prints nothing
+  // a value in a scratch registry key, for winenv.mjs to read from the folder with the stand-ins in it
+  const key = newKey();
+  assert.equal(writeUserEnv("D:/planted check", { CLAUDE_RELOCATE_REG_KEY: key }).ok, true);
+  const winenvUrl = pathToFileURL(path.join(HERE, "..", "src", "winenv.mjs")).href;
   const env = { ...process.env };
   delete env.NoDefaultCurrentDirectoryInExePath;
   const url = pathToFileURL(path.join(HERE, "..", "src", "spawn.mjs")).href;
@@ -57,7 +66,10 @@ test("a reg.exe or tasklist.exe in the working folder is not started (Windows lo
     'const args = ["/FO", "CSV", "/NH"];',
     'const plain = spawnSync("tasklist", args, { encoding: "utf8", windowsHide: true });',
     'const ours = spawn("tasklist", args, { encoding: "utf8", windowsHide: true });',
-    "console.log(JSON.stringify({ plain: plain.stdout || '', ours: ours.stdout || '' }));",
+    'const cmdOurs = spawn("cmd.exe", ["/d", "/c", "echo hi"], { encoding: "utf8", windowsHide: true });',
+    `import { readUserEnv } from ${JSON.stringify(winenvUrl)};`,
+    `const read = readUserEnv({ CLAUDE_RELOCATE_REG_KEY: ${JSON.stringify(key)} });`,
+    "console.log(JSON.stringify({ plain: plain.stdout || '', ours: ours.stdout || '', cmdOurs: cmdOurs.stdout || '', read }));",
   ].join("\n");
   const r = spawnSync(process.execPath, ["--input-type=module", "-e", script], { cwd: dir, env, encoding: "utf8", windowsHide: true, timeout: 60000 });
   assert.equal(r.status, 0, r.stderr);
@@ -65,4 +77,6 @@ test("a reg.exe or tasklist.exe in the working folder is not started (Windows lo
   if (out.plain.startsWith('"')) { t.skip("this Node does not look in the working folder first, so a plain name is safe here"); return; }
   assert.equal(out.plain, "", "a plain name started the stand-in in the working folder");
   assert.match(out.ours, /^"/, "spawn started the real tasklist, not the file in the working folder");
+  assert.match(out.cmdOurs, /^hi\s*$/, "spawn started the real cmd.exe (winenv.mjs runs reg query through it), not the file in the working folder");
+  assert.deepEqual([out.read.ok, out.read.exists, out.read.value], [true, true, "D:/planted check"], "and the reg query that cmd.exe runs read the real registry, not a reg.exe in the working folder");
 });

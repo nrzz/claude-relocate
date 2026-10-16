@@ -190,3 +190,19 @@ test("moveEntry: a source that changed while it was being copied is not removed,
   assert.match(fs.readFileSync(path.join(src, "a.txt"), "utf8"), /more/, "and the source has what was added to it");
   assert.ok(lexists(path.join(src, "dir", "b.txt")));
 });
+
+test("moveEntry: when the source cannot be listed again after the copy (a file went away), the copy is taken away and the error is given (found by review)", () => {
+  const base = tmpDir();
+  const src = sample(path.join(base, "src"));
+  const dst = path.join(base, "dst");
+  let copies = 0;
+  let armed = false;
+  const copyFile = (a, b, flags) => { fs.copyFileSync(a, b, flags); if (++copies === 3) armed = true; };
+  const realRead = fs.readdirSync;
+  fs.readdirSync = (p, ...rest) => { const names = realRead.call(fs, p, ...rest); return armed && path.resolve(String(p)) === src ? [...names, "ghost.txt"] : names; };
+  try {
+    assert.throws(() => moveEntry(src, dst, makeSys({ rename: exdev }), { skipped: [], copyFile }), { code: "ENOENT" });
+  } finally { fs.readdirSync = realRead; }
+  assert.ok(!lexists(dst), "the copy is gone");
+  assert.ok(lexists(path.join(src, "a.txt")), "and the source is untouched");
+});

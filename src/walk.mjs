@@ -138,7 +138,27 @@ export function makeLink(target, linkPath, kind) {
   else fs.symlinkSync(target, linkPath, IS_WIN ? "junction" : "dir");
 }
 
+let linkCount = 0;
+// Puts a link to `next` at p in place of the link that is there. The new one is made under another name first, so a
+// failure to make it (a file link needs a privilege on Windows) leaves the old one alone; if the swap itself fails,
+// the old one is put back.
+function replaceLink(p, next, type, oldTarget, oldType) {
+  const tmp = `${p}.claude-relocate-link-${process.pid}-${++linkCount}`;
+  fs.symlinkSync(next, tmp, type);
+  try {
+    fs.rmSync(p, { force: true });
+    fs.renameSync(tmp, p);
+  } catch (e) {
+    try { fs.rmSync(tmp, { force: true }); } catch { /* ours */ }
+    if (!statOf(p)) { try { fs.symlinkSync(oldTarget, p, oldType); } catch { /* it cannot be put back either */ } }
+    throw e;
+  }
+}
+
 // After a folder was renamed from `oldRoot` to `root`, re-aims the links in it as newTargetFor says. Returns how many.
+// With rewrite.skipRelative a link with a relative target is left alone: that is for the pass that puts a move back,
+// which cannot know whether the pass forward got to a link, and which only has to undo what that pass wrote (an
+// absolute target). A link that cannot be made again stays as it was, and the error is thrown.
 export function retargetLinks(root, oldRoot, rewrite) {
   let n = 0;
   const walk = (dir, oldDir) => {
@@ -147,10 +167,10 @@ export function retargetLinks(root, oldRoot, rewrite) {
       const st = fs.lstatSync(p);
       if (st.isSymbolicLink()) {
         const target = fs.readlinkSync(p);
+        if (rewrite.skipRelative && !path.isAbsolute(target)) continue;
         const next = newTargetFor(target, oldDir, rewrite);
         if (sameTarget(next, target)) continue;
-        fs.rmSync(p, { force: true });
-        fs.symlinkSync(next, p, linkTypeOf(next, dir));
+        replaceLink(p, next, linkTypeOf(next, dir), target, linkTypeOf(target, dir));
         try { fs.lutimesSync(p, st.atimeMs / 1000, st.mtimeMs / 1000); } catch { /* link times are best effort */ }
         n++;
       } else if (st.isDirectory()) walk(p, path.join(oldDir, name));
@@ -179,13 +199,7 @@ export function restoreRelativeLinks(root, records) {
     const dir = path.dirname(link);
     if (!samePath(path.resolve(dir, now), path.resolve(dir, r.was))) continue;
     try {
-      fs.rmSync(link, { force: true });
-      try {
-        fs.symlinkSync(r.was, link, linkTypeOf(r.was, dir));
-      } catch (e) {
-        fs.symlinkSync(now, link, linkTypeOf(now, dir));
-        throw e;
-      }
+      replaceLink(link, r.was, linkTypeOf(r.was, dir), now, linkTypeOf(now, dir));
       try { fs.lutimesSync(link, st.atimeMs / 1000, st.mtimeMs / 1000); } catch { /* link times are best effort */ }
       restored++;
     } catch {

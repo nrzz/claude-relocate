@@ -93,7 +93,7 @@ export function runUndo({ env, cwd, sys, opts, log = () => {} }) {
     else if (!isEmptyDir(A)) {
       const why = exists(path.join(A, INCOMPLETE)) ? `it holds an unfinished copy from an earlier undo, marked by a ${INCOMPLETE} file; delete the folder`
         : M.leftBehind ? `it holds what the move could not remove from it, ${M.leftBehind} item${M.leftBehind === 1 ? "" : "s"}; delete it`
-          : M.originalKept ? "the move kept it because it changed while it was being copied; compare it with the new folder and delete it"
+          : M.originalKept ? "the move kept it because it changed after the copy was checked; copy what you need from it into the new folder, then delete it"
             : "something created it after the move";
       problems.push(problem("origin-in-use", `${A} exists and is not empty (${why}). Move it away, then run this again.`));
     }
@@ -101,7 +101,7 @@ export function runUndo({ env, cwd, sys, opts, log = () => {} }) {
   const liveJson = path.join(B, CLAUDE_JSON);
   if (!M.origin.claudeJsonInside && exists(liveJson)) {
     const st = statOf(AJ);
-    if (st && !(st.isSymbolicLink() && samePath(realLoose(AJ), realLoose(liveJson)))) problems.push(problem("claude-json-in-use", `${AJ} exists (something created it after the move), and ${liveJson} has to go back there. Move one of them away, then run this again.`));
+    if (st && !(st.isSymbolicLink() && samePath(realLoose(AJ), realLoose(liveJson)))) problems.push(problem("claude-json-in-use", `${AJ} exists (${M.jsonLeft ? "the move could not remove it" : "something created it after the move"}), and ${liveJson} has to go back there. Move one of them away, then run this again.`));
   }
   // The old place may be a link to the new folder (move --link), and a link has the drive of what it leads to: the
   // folder lands where the old place is, so that is the folder to ask about.
@@ -152,7 +152,9 @@ export function runUndo({ env, cwd, sys, opts, log = () => {} }) {
       if (exists(p.to)) {
         log(`  moving ${p.path} back from the ${p.area} folder`);
         try {
-          if (moveEntry(p.to, linkPath, sys, { ...ctx, rewrite: { from: p.to, to: linkPath }, absoluteInside: false }).method === "copy") partsCopied = true;
+          const back = moveEntry(p.to, linkPath, sys, { ...ctx, rewrite: { from: p.to, to: linkPath }, absoluteInside: false });
+          if (back.method === "copy") partsCopied = true;
+          if (back.left) failed(`Could not remove ${describeLeft(back.left)} from the ${p.area} folder. ${p.path} is whole in ${linkPath}; delete what is left by hand.`);
           retargetLinks(linkPath, p.to, { from: p.to, to: linkPath });
           // a folder the move made inside the state or cache folder on the way (plugins/ for plugins/cache)
           const base = p.area === "state" ? M.destination.state : M.destination.cache;
@@ -200,6 +202,10 @@ export function runUndo({ env, cwd, sys, opts, log = () => {} }) {
         copyChildren(B, A, ctx);
         const same = compareSnapshots(before, snapshot(A), { rewrite: { from: B, to: A }, ignore: (rel) => rel === INCOMPLETE });
         if (!same.ok) throw new VerifyError(`The copy in ${A} does not match ${B} (${same.count} difference${same.count === 1 ? "" : "s"}, first: ${same.mismatches[0].path}: ${same.mismatches[0].problem}). Nothing in ${B} was changed.`, same.mismatches);
+        // the new folder may have changed while it was copied back (a program started meanwhile): the copy then lacks
+        // that, and B, which holds it, must not be removed
+        const nowB = compareSnapshots(before, snapshot(B));
+        if (!nowB.ok) throw new UserError(`${B} changed while it was being copied back (${nowB.count} difference${nowB.count === 1 ? "" : "s"}, the first at ${nowB.mismatches[0].path}), so nothing was removed from it. Close Claude Code and the Claude desktop app, then run undo again.`, "changed-during-copy");
         fs.rmSync(path.join(A, INCOMPLETE), { force: true });
         const timesOfB = fs.lstatSync(B);
         fs.utimesSync(A, timesOfB.atimeMs / 1000, timesOfB.mtimeMs / 1000);

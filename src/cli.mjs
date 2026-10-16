@@ -1,7 +1,8 @@
 // claude-relocate: move Claude Code's config folder somewhere else, safely, and set CLAUDE_CONFIG_DIR to match.
 // Commands: plan, move, verify, undo, status. It reads and writes files only; it runs no model and makes no network
-// request. The only programs it starts are tasklist/ps (to see whether claude is running), reg and setx (Windows
-// user environment), df or PowerShell (free space on a Node without fs.statfsSync), and `claude --version` in verify.
+// request. The only programs it starts are tasklist/ps (to see whether claude is running), cmd.exe, reg and setx
+// (Windows user environment), df or PowerShell (free space on a Node without fs.statfsSync), and `claude --version`
+// in verify.
 // The ones that ship with Windows are started by their full path (see spawn.mjs), not by a name that the working
 // folder could answer.
 import { runMove } from "./move.mjs";

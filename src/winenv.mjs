@@ -5,7 +5,7 @@
 // CLAUDE_RELOCATE_REG_KEY names another registry key to use instead of HKCU\Environment. The tests set it to a
 // scratch key under HKCU\Software, so that running them never changes the real environment of the person running
 // them. It is not a setting for people.
-import { spawn } from "./spawn.mjs";
+import { programPath, spawn } from "./spawn.mjs";
 
 export const NAME = "CLAUDE_CONFIG_DIR";
 export const REAL_KEY = "HKCU\\Environment";
@@ -33,7 +33,10 @@ export function parseRegQuery(text, name = NAME) {
 export function readUserEnv(env = process.env, run = defaultRun) {
   // reg prints in the console's code page, which turns é or 日本語 into other characters. A console set to UTF-8
   // (chcp 65001) makes it print them as they are.
-  const r = run("cmd.exe", ["/d", "/s", "/c", `chcp 65001>nul & reg query "${keyOf(env)}" /v ${NAME}`], { windowsVerbatimArguments: true });
+  // cmd.exe looks in the working folder first for the programs it is asked to run, so they are named by their full
+  // path; and /s takes off the first and the last quote of the line, so the whole line is in one more pair
+  const line = `"${programPath("chcp.com")}" 65001>nul & "${programPath("reg.exe")}" query "${keyOf(env)}" /v ${NAME}`;
+  const r = run("cmd.exe", ["/d", "/s", "/c", `"${line}"`], { windowsVerbatimArguments: true });
   if (r.error) return { ok: false, exists: false, value: null, error: `reg.exe could not run (${r.error.message})` };
   if (r.status !== 0) {
     // reg exits 1 both for "no such value" and for "no such key"; a value that is not there is not an error
@@ -68,8 +71,8 @@ export function removeUserEnv(env = process.env, run = defaultRun) {
 // registry write does not, so on versions of Windows where Explorer keeps its own copy until told, a terminal
 // started from the Start menu would still see the old value. Writing and deleting a throwaway value with setx
 // sends the broadcast. Only for the real key (a test's scratch key is not the environment), and never an error.
-// On Windows 11 build 26300 a program started by Explorer saw a plain `reg add` and `reg delete` at once; the
-// broadcast is for the other versions, which were not tried.
+// Whether a plain `reg add` is enough on a given version of Windows was not checked: nothing here has written the
+// real key, and the broadcast costs nothing.
 export function broadcast(env = process.env, run = defaultRun) {
   if (!isRealKey(env)) return false;
   try {

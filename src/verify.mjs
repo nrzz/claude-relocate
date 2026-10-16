@@ -130,12 +130,13 @@ export function runVerify({ env, cwd, sys }) {
     const json = !M.origin.claudeJsonInside ? statOf(M.origin.claudeJson) : null;
     const jsonAgain = !!json && !json.isSymbolicLink();
     // the manifest knows when the move itself left the old place as it is: that is not a program writing there
-    const kept = M.originalKept ? "the move kept it because it changed while it was being copied" : M.leftBehind ? `the move could not remove ${plural(M.leftBehind, "item")} of it` : null;
+    const kept = M.originalKept ? "the move kept it because it changed after the copy was checked" : M.leftBehind ? `the move could not remove ${plural(M.leftBehind, "item")} of it` : null;
     const bits = [];
     if (items) bits.push(kept ? `${M.origin.configDir} still holds ${plural(items, "item")} (${kept})` : `${M.origin.configDir} exists again and holds ${plural(items, "item")}`);
-    if (jsonAgain) bits.push(M.originalKept ? `${M.origin.claudeJson} was kept with it` : `${M.origin.claudeJson} was made again${items ? " next to it" : ""}`);
-    const advice = kept ? "Delete what is left by hand once you do not need it" : "A program that ignores CLAUDE_CONFIG_DIR may be writing there";
-    if (bits.length) add("old-place", "warn", `${bits.join(", and ")}; Claude Code now uses ${dest}. ${advice}; undo refuses while ${bits.length > 1 ? "they are" : "it is"} there${kept ? "." : "; move --link makes such programs use the new folder."}`, { path: M.origin.configDir });
+    if (jsonAgain) bits.push(M.originalKept ? `${M.origin.claudeJson} was kept with it` : M.jsonLeft ? `${M.origin.claudeJson} is still there: the move could not remove it` : `${M.origin.claudeJson} was made again${items ? " next to it" : ""}`);
+    const leftOver = !!(kept || M.jsonLeft);
+    const advice = M.originalKept ? "Copy what you need from it into the new folder, then delete it" : leftOver ? "Delete what is left by hand once you do not need it" : "A program that ignores CLAUDE_CONFIG_DIR may be writing there";
+    if (bits.length) add("old-place", "warn", `${bits.join(", and ")}; Claude Code now uses ${dest}. ${advice}; undo refuses while ${bits.length > 1 ? "they are" : "it is"} there${leftOver ? "." : "; move --link makes such programs use the new folder."}`, { path: M.origin.configDir });
   }
 
   // the real claude

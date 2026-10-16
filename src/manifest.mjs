@@ -16,6 +16,8 @@
 //                wrote as absolute links so that they keep working; path is below the config folder, undo writes `was` back
 //   leftBehind   (only when set) how many items a copy could not remove from the old place, such as a file another
 //                program held open; undo says so when that folder is still there
+//   originalKept (only when set) the old place was kept because it changed after the copy was checked
+//   jsonLeft     (only when set) the .claude.json next to the old folder could not be removed
 //   options      { link, noEnv, xdg }
 //   previous     the manifest this folder had before (when the folder was itself the destination of an earlier
 //                move), so that two undos go back two moves

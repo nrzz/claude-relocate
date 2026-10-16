@@ -105,9 +105,12 @@ test("the real claude runs from the folder the tool moved the config to, and und
     assert.ok(!lexists(sb.cfg) && lexists(path.join(sb.dest, "settings.json")));
 
     // 3. with CLAUDE_CONFIG_DIR at the new place
-    const version = claudeCommand(sb, ["--version"], { cfg: sb.dest });
+    // (with the fake API as its endpoint and a key, so that a request would show: claude --version sends none)
+    const askedBefore = api.requests.length;
+    const version = claudeCommand(sb, ["--version"], { cfg: sb.dest, env: { ANTHROPIC_API_KEY: "sk-ant-probe", ANTHROPIC_BASE_URL: `http://127.0.0.1:${api.port}` } });
     assert.equal(version.code, 0, version.err);
     assert.match(version.out, /^\d+\.\d+\.\d+/);
+    assert.equal(api.requests.length, askedBefore, "claude --version sent no request to the fake API that was its endpoint");
     const resumed = await runClaude(sb, api, ["-p", "PROMPT-TWO what was the word?", "--resume", ID1, "--output-format", "json"], { cfg: sb.dest });
     assert.equal(resumed.code, 0, resumed.err);
     assert.equal(resumed.result.session_id, ID1, "the same session continues");
@@ -148,6 +151,8 @@ test("the real claude runs from the folder the tool moved the config to, and und
     assert.equal(deviceIdOf(lastAsked(api, "PROMPT-FOUR")), USER_ID);
     assert.equal(readLog(sb).at(-1).env.CLAUDE_CONFIG_DIR, sb.cfg);
     assert.ok(!lexists(sb.dest));
+    const devices = api.requests.map((r) => deviceIdOf(r)).filter(Boolean);
+    assert.ok(devices.length >= 4 && devices.every((d) => d === USER_ID), `the ${devices.length} requests of this test that carry a device id all carried the userID of the .claude.json that was in use`);
   } finally { await api.close(); }
 });
 

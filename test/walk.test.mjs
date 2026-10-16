@@ -386,3 +386,22 @@ test("restoreRelativeLinks writes the old relative text back into a link that wa
   assert.deepEqual(restoreRelativeLinks(root, records), { restored: 0, failed: 0 }, "nothing is left to do the second time");
   assert.deepEqual(restoreRelativeLinks(root, undefined), { restored: 0, failed: 0 });
 });
+
+test("retargetLinks leaves a link as it was when the new one cannot be made, and throws; with skipRelative it leaves relative links alone", { skip: noFileLinks() }, () => {
+  const dir = tmpDir();
+  const old = path.join(dir, "old");
+  const neu = path.join(dir, "new");
+  put(path.join(neu, "a.txt"), "a");
+  fs.symlinkSync(path.join(old, "a.txt"), path.join(neu, "link"), "file");
+  const real = fs.symlinkSync;
+  fs.symlinkSync = (target, p, ...rest) => {
+    if (String(target) === path.join(neu, "a.txt")) throw Object.assign(new Error("EPERM: operation not permitted, symlink"), { code: "EPERM" });
+    return real.call(fs, target, p, ...rest);
+  };
+  try { assert.throws(() => retargetLinks(neu, old, { from: old, to: neu }), { code: "EPERM" }); } finally { fs.symlinkSync = real; }
+  assert.equal(fs.readlinkSync(path.join(neu, "link")), path.join(old, "a.txt"), "the link is as it was");
+  fs.symlinkSync(path.join("..", "outside.txt"), path.join(neu, "rel"), "file");
+  assert.equal(retargetLinks(neu, old, { from: old, to: neu, skipRelative: true }), 1, "only the absolute link is re-aimed");
+  assert.equal(fs.readlinkSync(path.join(neu, "rel")), path.join("..", "outside.txt"));
+  assert.equal(fs.readlinkSync(path.join(neu, "link")), path.join(neu, "a.txt"));
+});

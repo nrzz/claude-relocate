@@ -337,7 +337,7 @@ test("verify says what a leftover old place is when the manifest knows: files th
   const original = read(file);
   const cases = [
     [{ leftBehind: 1 }, /still holds 1 item \(the move could not remove 1 item of it\); Claude Code now uses .*dest\. Delete what is left by hand once you do not need it; undo refuses while it is there\.$/],
-    [{ originalKept: true }, /still holds 1 item \(the move kept it because it changed while it was being copied\); Claude Code now uses .*dest\. Delete what is left by hand once you do not need it; undo refuses while it is there\.$/],
+    [{ originalKept: true }, /still holds 1 item \(the move kept it because it changed after the copy was checked\); Claude Code now uses .*dest\. Copy what you need from it into the new folder, then delete it; undo refuses while it is there\.$/],
   ];
   for (const [fields, expected] of cases) {
     fs.writeFileSync(file, JSON.stringify({ ...JSON.parse(original), ...fields }, null, 2));
@@ -345,6 +345,11 @@ test("verify says what a leftover old place is when the manifest knows: files th
     assert.equal(c.level, "warn");
     assert.match(c.message, expected);
   }
+  // a ~/.claude.json the move could not remove
+  put(w.claudeJson, '{"left":true}');
+  fs.writeFileSync(file, JSON.stringify({ ...JSON.parse(original), jsonLeft: true }, null, 2));
+  assert.match(check(await verify(atDest(w)), "old-place").message, /is still there: the move could not remove it; Claude Code now uses .*dest\. Delete what is left by hand once you do not need it; undo refuses while they are there\.$/);
+  fs.rmSync(w.claudeJson);
   fs.writeFileSync(file, original);
   assert.match(check(await verify(atDest(w)), "old-place").message, /exists again and holds 1 item; Claude Code now uses .*A program that ignores CLAUDE_CONFIG_DIR may be writing there/, "without that knowledge it is the old message");
 });

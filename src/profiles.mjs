@@ -82,7 +82,8 @@ export function findBlock(text) {
   let start = -1;
   for (let i = 0; i < parts.length; i++) {
     const t = parts[i].replace(/^\uFEFF/, "").trim();
-    if (start < 0 && t === START) start = offset;
+    // a byte-order mark at the top of the file belongs to the file, not to the block
+    if (start < 0 && t === START) start = offset + (parts[i].startsWith("\uFEFF") ? 1 : 0);
     else if (start >= 0 && t === END) return { start, end: offset + parts[i].length, text: text.slice(start, offset + parts[i].length) };
     offset += parts[i].length;
   }

@@ -781,33 +781,59 @@ test("move to a new folder below a link to a real folder, and undo, work through
   assert.deepEqual(diffTrees(before.base, everything(w).base), [], "the link and the folder behind it are as they were");
 });
 
-test("a single folder whose original changes while it is copied: the move finishes, keeps the original, says what changed, and undo says why the old place is in the way (found by review)", async () => {
-  const w = fresh("mv50", { variable: false });
+// Something writes to the folder after the copy was checked, as the manifest is being written (the profiles and the
+// user environment come between the copy and the removal of the original, and take a moment).
+function writeAfterTheCopy(w) {
+  const real = fs.writeFileSync;
+  let done = false;
+  fs.writeFileSync = (p, ...rest) => {
+    if (!done && String(p).includes("relocate-manifest.json.tmp-")) { done = true; fs.appendFileSync(path.join(w.cfg, "history.jsonl"), "written after the copy was checked\n"); }
+    return real.call(fs, p, ...rest);
+  };
+  return () => { fs.writeFileSync = real; };
+}
+
+test("a single folder whose original changes while it is copied: the move stops with nothing changed, and the copy is taken away again (found by review)", async () => {
+  const w = fresh("mv50a", { variable: false });
+  const before = everything(w);
   const copied = [];
   const copyFile = (a, b, flags) => { fs.copyFileSync(a, b, flags); copied.push(a); if (copied.length === 4) fs.appendFileSync(copied[0], "written by a program that started meanwhile\n"); };
-  const over = { rename: exdev, drive: secondDriveAt(w.dest), copyFile };
-  const r = await moveJson(["--to", w.dest, "--yes", "--no-env"], w, over);
+  const r = await moveJson(["--to", w.dest, "--yes"], w, { rename: exdev, drive: secondDriveAt(w.dest), copyFile });
+  assert.equal(r.code, 1, r.all);
+  assert.match(r.json.error, /changed while it was being copied \(1 difference, the first at .+\)\. Nothing was changed\. Close Claude Code and the Claude desktop app, then run this again\.$/);
+  assert.ok(!lexists(w.dest), "the copy is gone");
+  const differences = diffTrees(before.base, everything(w).base);
+  assert.equal(differences.length, 1, `only the file the other program wrote to differs; no profile, no manifest, no link: ${differences.join("; ")}`);
+});
+
+test("a single folder whose original changes after the copy was checked: the move finishes, keeps the original, says what changed, and undo says why the old place is in the way (found by review)", async () => {
+  const w = fresh("mv50", { variable: false });
+  const over = { rename: exdev, drive: secondDriveAt(w.dest) };
+  const release = writeAfterTheCopy(w);
+  let r;
+  try { r = await moveJson(["--to", w.dest, "--yes", "--no-env"], w, over); } finally { release(); }
   assert.equal(r.code, 1, r.all);
   assert.deepEqual([r.json.ok, r.json.incomplete], [false, true]);
-  assert.ok(r.json.warnings.some((x) => /changed while it was being copied, so the original was not removed\. The copy in .* is .* as it was when the move began/.test(x)), r.json.warnings.join(" | "));
+  assert.ok(r.json.warnings.some((x) => /changed after the copy was checked, so the original was not removed\. The copy in .* is .* as it was when the move began/.test(x)), r.json.warnings.join(" | "));
   assert.ok(lexists(path.join(w.cfg, "settings.json")), "the original is still there");
   assert.ok(lexists(w.claudeJson), "and so is the ~/.claude.json that went with it");
   assert.ok(lexists(path.join(w.dest, "settings.json")) && lexists(path.join(w.dest, ".claude.json")), "the copy is complete");
   assert.equal(manifestOf(w.dest).originalKept, true);
   const refused = await runJson(["undo", "--yes"], { ...w, env: { ...w.env, CLAUDE_CONFIG_DIR: w.dest } }, { sys: w.sys(over) });
   assert.equal(refused.code, 1);
-  assert.match(refused.json.error, /the move kept it because it changed while it was being copied; compare it with the new folder and delete it\)\. Move it away/);
+  assert.match(refused.json.error, /the move kept it because it changed after the copy was checked; copy what you need from it into the new folder, then delete it\)\. Move it away/);
 });
 
 test("the text of a move that kept its original, or could not empty the old place, does not say the original was removed, and says what to do before undo (found by review)", async () => {
-  const copied = [];
-  const copyFile = (a, b, flags) => { fs.copyFileSync(a, b, flags); copied.push(a); if (copied.length === 4) fs.appendFileSync(copied[0], "written while copying\n"); };
   const kept = fresh("mv51a", { variable: false });
-  const k = await move(kept, ["--to", kept.dest, "--yes", "--no-env"], { rename: exdev, drive: secondDriveAt(kept.dest), copyFile });
+  const release0 = writeAfterTheCopy(kept);
+  let k;
+  try { k = await move(kept, ["--to", kept.dest, "--yes", "--no-env"], { rename: exdev, drive: secondDriveAt(kept.dest) }); } finally { release0(); }
   assert.equal(k.code, 1, k.all);
-  assert.match(k.out, /^ {2}copied and checked; the original was kept, because it changed while it was being copied$/m);
+  assert.match(k.out, /^ {2}copied and checked; the original was kept, because it changed after the copy was checked$/m);
   assert.doesNotMatch(k.out, /then the original was removed/);
-  assert.match(k.out, /^To put everything back: delete what is left of the old place, as the notes say, then run claude-relocate undo$/m);
+  assert.match(k.out, /^The old place has newer changes than the copy in the new folder: copy what you need from it into the new folder, then delete the old place\. undo waits until it is gone\.$/m);
+  assert.doesNotMatch(k.out, /then run claude-relocate undo/, "undo is not offered: deleting the old place and running it would bring back the older copy");
   const stuck = fresh("mv51b");
   put(path.join(stuck.cfg, "projects", "-work-shop", "locked.txt"), "held open\n");
   const release = holdOpen("locked.txt", stuck.cfg);
@@ -821,4 +847,78 @@ test("the text of a move that kept its original, or could not empty the old plac
   const o = await move(ok, ["--to", ok.dest, "--yes", "--no-env"], { rename: exdev, drive: secondDriveAt(ok.dest) });
   assert.match(o.out, /^ {2}copied and checked, then the original was removed$/m);
   assert.match(o.out, /^To put everything back: claude-relocate undo$/m);
+});
+
+test("when the old folder can be moved aside but not emptied, what is left is in the folder next to it, the move names it, and undo does not wait for it", async () => {
+  const w = fresh("mv52");
+  put(path.join(w.cfg, "projects", "-work-shop", "locked.txt"), "held open\n");
+  const before = everything(w);
+  const over = { rename: exdev, drive: secondDriveAt(w.dest) };
+  const aside = `${w.cfg}.claude-relocate-old`;
+  const release = holdOpen("locked.txt", w.cfg);
+  let r;
+  try { r = await moveJson(["--to", w.dest, "--yes", "--no-env"], w, over); } finally { release(); }
+  assert.equal(r.code, 1, r.all);
+  assert.ok(r.json.warnings.some((x) => x.includes("locked.txt") && x.includes(aside)), r.json.warnings.join(" | "));
+  assert.ok(!lexists(w.cfg), "the old place itself is gone");
+  assert.deepEqual(Object.keys(tree(aside)).sort(), ["projects", "projects/-work-shop", "projects/-work-shop/locked.txt"]);
+  const u = await runJson(["undo", "--yes"], { ...w, env: { ...w.env, CLAUDE_CONFIG_DIR: w.dest } }, { sys: w.sys(over) });
+  assert.equal(u.code, 0, u.all);
+  assert.deepEqual(diffTrees(before.base, everything(w).base, { ignore: ["cfg.claude-relocate-old/"] }), [], "everything is back, and the leftover is still beside it");
+  assert.ok(lexists(path.join(aside, "projects", "-work-shop", "locked.txt")));
+});
+
+test("a rename whose result does not match is undone with the relative links that leave the folder as they were (found by review)", { skip: noFileLinks() }, async () => {
+  const w = fresh("mv53");
+  put(path.join(w.base, "dotfiles", "x.md"), "x");
+  fs.symlinkSync(path.join("..", "dotfiles", "x.md"), path.join(w.cfg, "linked.md"), "file");
+  const before = tree(w.cfg);
+  const tamper = (a, b) => { fs.renameSync(a, b); fs.writeFileSync(path.join(b, "intruder.txt"), "x"); };
+  const r = await move(w, ["--to", w.dest, "--yes"], { rename: tamper });
+  assert.equal(r.code, 1);
+  assert.deepEqual(diffTrees(before, tree(w.cfg), { ignore: ["intruder.txt"] }), [], "the link has the text it had");
+});
+
+test("--xdg split that fails half way through the walk leaves the relative links that leave the folder as they were: the pass that re-aims links had not run (found by review)", { skip: noFileLinks() }, async () => {
+  const w = fresh("mv54", { platform: LINUX });
+  put(path.join(w.base, "dotfiles", "x.md"), "x");
+  fs.symlinkSync(path.join("..", "dotfiles", "x.md"), path.join(w.cfg, "linked.md"), "file");
+  fs.symlinkSync(path.join("..", "..", "..", "dotfiles", "x.md"), path.join(w.cfg, "projects", "-work-shop", "linked.md"), "file");
+  const before = everything(w);
+  let n = 0;
+  const rename = (a, b) => { if (++n === 14) throw Object.assign(new Error("EIO: i/o error"), { code: "EIO" }); return fs.renameSync(a, b); };
+  const r = await move(w, ["--xdg", "--yes"], { platform: LINUX, rename });
+  assert.equal(r.code, 1);
+  assert.match(r.err, /The move stopped: EIO/);
+  assert.deepEqual(diffTrees(before.base, everything(w).base), [], "every file and every link as it was");
+});
+
+test("when the original cannot be listed again as it is looked at once more (a file went away), the move keeps it and says so; it does not end in an error after the profiles were written (found by review)", async () => {
+  const w = fresh("mv55", { variable: false });
+  const realWrite = fs.writeFileSync;
+  const realRead = fs.readdirSync;
+  let armed = false;
+  fs.writeFileSync = (p, ...rest) => { if (String(p).includes("relocate-manifest.json.tmp-")) armed = true; return realWrite.call(fs, p, ...rest); };
+  fs.readdirSync = (p, ...rest) => { const names = realRead.call(fs, p, ...rest); return armed && path.resolve(String(p)) === w.cfg ? [...names, "ghost.txt"] : names; };
+  let r;
+  try { r = await moveJson(["--to", w.dest, "--yes", "--no-env"], w, { rename: exdev, drive: secondDriveAt(w.dest) }); } finally { fs.writeFileSync = realWrite; fs.readdirSync = realRead; }
+  assert.equal(r.code, 1, r.all);
+  assert.ok(r.json.warnings.some((x) => /a file in it went away while it was looked at again: ENOENT\) changed after the copy was checked, so the original was not removed/.test(x)), r.json.warnings.join(" | "));
+  assert.ok(lexists(path.join(w.cfg, "settings.json")), "the original is kept");
+  assert.equal(manifestOf(w.dest).originalKept, true);
+});
+
+test("a ~/.claude.json next to the old folder that cannot be removed is said so, kept in the manifest, and named in undo's refusal (found by review)", async () => {
+  const w = fresh("mv56", { variable: false });
+  const over = { rename: exdev, drive: secondDriveAt(w.dest) };
+  const real = fs.rmSync;
+  fs.rmSync = (p, o) => { if (path.resolve(String(p)) === w.claudeJson) throw Object.assign(new Error("EBUSY: resource busy or locked, unlink"), { code: "EBUSY" }); return real.call(fs, p, o); };
+  let r;
+  try { r = await moveJson(["--to", w.dest, "--yes", "--no-env"], w, over); } finally { fs.rmSync = real; }
+  assert.equal(r.code, 1, r.all);
+  assert.ok(r.json.warnings.some((x) => x.includes("Could not remove") && x.includes(".claude.json") && x.includes("EBUSY")), r.json.warnings.join(" | "));
+  assert.equal(manifestOf(w.dest).jsonLeft, true);
+  const refused = await runJson(["undo", "--yes"], { ...w, env: { ...w.env, CLAUDE_CONFIG_DIR: w.dest } }, { sys: w.sys(over) });
+  assert.equal(refused.code, 1);
+  assert.match(refused.json.error, /\.claude\.json exists \(the move could not remove it\), and .* has to go back there\./);
 });
