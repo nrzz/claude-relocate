@@ -2,9 +2,10 @@
 // replaced inside the config folder by a symbolic link.
 //
 // SPLIT_VERIFIED says whether the real Claude Code was seen to work through such links. Linux and macOS are
-// checked in CI (test/e2e-move.test.mjs, "xdg split"): a session written through the linked projects/ folder and
-// resumed, a plugin loaded through the linked plugins/cache folder. If that check ever fails there, this is
-// the one place to switch the split off, and `--xdg` then moves everything into one folder.
+// checked in CI (test/e2e-claude.test.mjs, "the split of --xdg"): a session written through the linked projects/
+// folder and resumed, a plugin loaded through the linked plugins/cache folder. On Windows the same layout was
+// tried with junctions. If that check ever fails in CI, this is the one place to switch the split off, and
+// `--xdg` then moves everything into one folder.
 import path from "node:path";
 import { CACHE_PARTS, STATE_PARTS } from "./inventory.mjs";
 import { statOf } from "./util.mjs";

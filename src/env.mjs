@@ -1,11 +1,13 @@
-// Where Claude Code keeps its files, as Claude Code 2.1.295 was seen to read and write them (README, "What was
-// verified"):
+// Where Claude Code keeps its files, as Claude Code 2.1.295 and 2.1.299 were seen to read and write them on Windows
+// (README, "What was verified"; test/e2e-claude.test.mjs repeats it on every CI run on Linux and macOS):
 //
 //   CLAUDE_CONFIG_DIR set      the config folder is that folder, and .claude.json is inside it:
-//                              <CLAUDE_CONFIG_DIR>/.claude.json. ~/.claude.json is not touched.
+//                              <CLAUDE_CONFIG_DIR>/.claude.json. ~/.claude.json is not touched. This holds when the
+//                              variable names ~/.claude itself.
 //   CLAUDE_CONFIG_DIR not set  the config folder is ~/.claude, and .claude.json is NOT inside it but next to it:
 //                              ~/.claude.json. ~/.claude/.claude.json is not touched.
-//   XDG_CONFIG_HOME            not read by 2.1.295 on Windows; CI repeats the probe on Linux and macOS.
+//   XDG_CONFIG_HOME and the other two   not read when CLAUDE_CONFIG_DIR is not set, even when
+//                              $XDG_CONFIG_HOME/claude exists (Windows; the test reports what it sees elsewhere).
 //
 // The home folder is USERPROFILE on Windows and HOME elsewhere, as for Node's os.homedir().
 import os from "node:os";
