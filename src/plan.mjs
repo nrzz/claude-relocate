@@ -35,14 +35,19 @@ function destinationProblems(dest, origin, label) {
     if (st.isSymbolicLink()) out.push(problem("destination-is-link", `${label} ${dest} is a link. Choose a real folder.`));
     else if (!st.isDirectory()) out.push(problem("destination-is-file", `${label} ${dest} is a file.`));
     else if (!isEmptyDir(dest)) {
-      const n = fs.readdirSync(dest).length;
+      let n = null;
+      try { n = fs.readdirSync(dest).length; } catch { /* it cannot be listed */ }
       const unfinished = fs.existsSync(path.join(dest, ".claude-relocate-incomplete"));
-      out.push(problem("destination-not-empty", `${label} ${dest} exists and is not empty (${count(n)} ${n === 1 ? "item" : "items"})${unfinished ? "; it holds an unfinished copy from an earlier run (.claude-relocate-incomplete), which you can delete" : ""}. Choose a new or empty folder.`));
+      if (n === null) out.push(problem("destination-unreadable", `${label} ${dest} exists and cannot be read. Choose a new or empty folder.`));
+      else out.push(problem("destination-not-empty", `${label} ${dest} exists and is not empty (${count(n)} ${n === 1 ? "item" : "items"})${unfinished ? "; it holds an unfinished copy from an earlier run (.claude-relocate-incomplete), which you can delete" : ""}. Choose a new or empty folder.`));
     }
   } else {
+    // the nearest folder that exists, followed through a link: ~/.config may be a link to a dotfiles folder
     const anc = nearestExisting(dest);
-    const sa = statOf(anc);
-    if (sa && !sa.isDirectory()) out.push(problem("destination-is-file", `${label} ${dest} cannot be created: ${anc} is a file.`));
+    let sa = null;
+    try { sa = fs.statSync(anc); } catch { /* a link that leads nowhere */ }
+    if (!sa) out.push(problem("destination-is-link", `${label} ${dest} cannot be created: ${anc} is a link that leads nowhere.`));
+    else if (!sa.isDirectory()) out.push(problem("destination-is-file", `${label} ${dest} cannot be created: ${anc} is a file.`));
     else {
       try { fs.accessSync(anc, fs.constants.W_OK); } catch { out.push(problem("destination-unwritable", `${label} ${dest} cannot be created: ${anc} is not writable.`)); }
     }
@@ -165,6 +170,8 @@ function planDestination(model, { env, cwd, sys, opts, cfg, home, platform }) {
       const base = target[area];
       if (samePath(realLoose(base), realLoose(origin)) || isInside(realLoose(origin), realLoose(base))) problems.push(problem("destination-in-origin", `The ${area} folder ${base} is the config folder or inside it. Choose another with XDG_${area.toUpperCase()}_HOME.`));
       else if (isInside(realLoose(base), realLoose(origin))) problems.push(problem("origin-in-destination", `The config folder ${origin} is inside the ${area} folder ${base}. Choose another with XDG_${area.toUpperCase()}_HOME.`));
+      // the parts are linked from the config folder to these folders: they have to be places of their own
+      else if (isInside(realLoose(target.config), realLoose(base)) || isInside(realLoose(base), realLoose(target.config))) problems.push(problem("xdg-overlap", `The ${area} folder ${base} and the config folder ${target.config} are the same folder, or one is inside the other. Set XDG_${area.toUpperCase()}_HOME and XDG_CONFIG_HOME to places that are apart.`));
     }
     for (const p of target.parts) {
       const st = statOf(p.to);

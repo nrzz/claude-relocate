@@ -5,7 +5,7 @@
 // CLAUDE_RELOCATE_REG_KEY names another registry key to use instead of HKCU\Environment. The tests set it to a
 // scratch key under HKCU\Software, so that running them never changes the real environment of the person running
 // them. It is not a setting for people.
-import { spawnSync } from "node:child_process";
+import { spawn } from "./spawn.mjs";
 
 export const NAME = "CLAUDE_CONFIG_DIR";
 export const REAL_KEY = "HKCU\\Environment";
@@ -13,7 +13,7 @@ export const REAL_KEY = "HKCU\\Environment";
 export const keyOf = (env = process.env) => (env.CLAUDE_RELOCATE_REG_KEY && env.CLAUDE_RELOCATE_REG_KEY.trim()) || REAL_KEY;
 export const isRealKey = (env = process.env) => keyOf(env).toLowerCase() === REAL_KEY.toLowerCase();
 
-const defaultRun = (cmd, args, opts = {}) => spawnSync(cmd, args, { encoding: "utf8", windowsHide: true, timeout: 30000, ...opts });
+const defaultRun = (cmd, args, opts = {}) => spawn(cmd, args, { encoding: "utf8", windowsHide: true, timeout: 30000, ...opts });
 
 // `reg query <key> /v <name>` prints
 //

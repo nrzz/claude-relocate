@@ -19,8 +19,8 @@ import { MANIFEST_NAME, manifestFile, newManifest, readManifest, writeManifest }
 import { buildPlan } from "./plan.mjs";
 import { writeProfile } from "./profiles.mjs";
 import { COPY_INSTEAD, VerifyError, copyChildren, moveEntry, moveFile } from "./transfer.mjs";
-import { UserError, exists, isoOf, uniquePath } from "./util.mjs";
-import { compareSnapshots, makeLink, pruneEmpty, removeEmptyParents, removeTree, retargetLinks, snapshot } from "./walk.mjs";
+import { UserError, describeLeft, exists, isoOf, makeDirs, uniquePath } from "./util.mjs";
+import { TIME_TOLERANCE_MS, compareSnapshots, fileRow, makeLink, newTargetFor, pruneEmpty, removeEmptyParents, removeTree, removeWhatYouCan, restoreRelativeLinks, retargetLinks, snapshot } from "./walk.mjs";
 import { NAME as REG_NAME, keyOf, readUserEnv, writeUserEnv } from "./winenv.mjs";
 
 export const INCOMPLETE = ".claude-relocate-incomplete";
@@ -91,16 +91,30 @@ function execute(model, opts, sys, env, log, steps) {
   const ctx = { skipped: [], copyFile: sys.copyFile, rewrite: { from: A, to: B } };
   const stA = fs.lstatSync(A);
   const snapA = snapshot(A);
+  const rowAJ = jsonOutside ? fileRow(AJ) : null;
   // what is carried: the folder, and the .claude.json that sat next to it
   const carried = { bytes: snapA.bytes + (jsonOutside ? fs.lstatSync(AJ).size : 0), files: snapA.files + (jsonOutside ? 1 : 0), ...countSessions(snapA) };
   const methods = new Set();
   const done = []; // split moves and links made so far, so that a failure can put them back
   const links = [];
 
+  // Relative links that reach out of the folder (a dotfiles repository next to it) are written as absolute links in
+  // the new place, so that they keep working. Their old text is kept in the manifest, and undo writes it back.
+  const relativeLinks = [];
+  for (const [rel, row] of snapA.entries) {
+    if (row.t !== "l" || path.isAbsolute(row.target)) continue;
+    const inPart = T.parts.some((p) => rel === p.path || rel.startsWith(`${p.path}/`));
+    if (path.isAbsolute(newTargetFor(row.target, row.dir, { from: A, to: B, absoluteInside: inPart }))) relativeLinks.push({ path: rel, was: row.target });
+  }
+  // What a copy could not remove from the old place (a file another program holds open): the copy is whole, so the
+  // move goes on, and the person is told what stays behind.
+  let leftBehind = 0;
+  const left = (items) => { leftBehind += items.length; failed(`Could not remove ${describeLeft(items)} from ${A}. It is whole in the new place; delete what is left by hand.`); };
+
   // The first folder made on the way to each place (mkdir tells), so that a rollback and `undo` can remove what this move made.
-  const created = { config: fs.mkdirSync(path.dirname(B), { recursive: true }) || null, state: null, cache: null };
-  if (T.state) created.state = fs.mkdirSync(T.state, { recursive: true }) || null;
-  if (T.cache) created.cache = fs.mkdirSync(T.cache, { recursive: true }) || null;
+  const created = { config: makeDirs(path.dirname(B)), state: null, cache: null };
+  if (T.state) created.state = makeDirs(T.state);
+  if (T.cache) created.cache = makeDirs(T.cache);
   const pruneCreated = () => { for (const key of ["state", "cache", "config"]) if (created[key]) pruneEmpty(created[key]); };
 
   const emptyB = () => { for (const n of fs.readdirSync(B)) removeTree(path.join(B, n)); };
@@ -123,6 +137,7 @@ function execute(model, opts, sys, env, log, steps) {
       try {
         sys.rename(B, A);
         retargetLinks(A, B, { from: B, to: A });
+        restoreRelativeLinks(A, relativeLinks);
         if (emptyInTheWay) fs.mkdirSync(B);
       } catch (err) { warnings.push(`Could not rename ${B} back to ${A} (${err.code || err.message}); everything is in ${B}.`); }
     };
@@ -143,7 +158,7 @@ function execute(model, opts, sys, env, log, steps) {
 
   // Another drive: everything is copied, the copy is checked, and the original stays for now.
   function copyWhole() {
-    fs.mkdirSync(B, { recursive: true });
+    makeDirs(B);
     fs.writeFileSync(path.join(B, INCOMPLETE), "claude-relocate is copying into this folder. If this file is still here, the copy was interrupted: delete the folder.\n");
     try {
       copyChildren(A, B, { ...ctx, onEntry: (name) => log(`  copying ${name}`) });
@@ -170,7 +185,7 @@ function execute(model, opts, sys, env, log, steps) {
 
   // The state and cache parts go to their own folders, each replaced by a symbolic link; the rest goes to B.
   function moveSplit() {
-    fs.mkdirSync(B, { recursive: true });
+    makeDirs(B);
     const walk = (rel) => {
       const dirA = rel ? path.join(A, ...rel.split("/")) : A;
       const dirB = rel ? path.join(B, ...rel.split("/")) : B;
@@ -180,9 +195,11 @@ function execute(model, opts, sys, env, log, steps) {
         const part = T.parts.find((p) => p.path === r);
         if (part) {
           log(`  moving ${r} to the ${part.area} folder`);
-          methods.add(moveEntry(from, part.to, sys, { ...ctx, absoluteInside: true }).method);
+          const moved = moveEntry(from, part.to, sys, { ...ctx, absoluteInside: true });
+          methods.add(moved.method);
           done.push({ from, to: part.to });
-          fs.mkdirSync(path.dirname(part.link), { recursive: true });
+          if (moved.left) left(moved.left);
+          makeDirs(path.dirname(part.link));
           makeLink(part.to, part.link, "dir");
           done.push({ link: part.link });
           links.push({ path: part.link, target: part.to, kind: "dir", purpose: "xdg" });
@@ -191,11 +208,13 @@ function execute(model, opts, sys, env, log, steps) {
           fs.mkdirSync(path.join(dirB, name));
           walk(r);
           fs.utimesSync(path.join(dirB, name), st.atimeMs / 1000, st.mtimeMs / 1000);
-          fs.rmdirSync(from);
+          try { fs.rmdirSync(from); } catch { /* something is left in it: said above, or by the check of the config folder below */ }
         } else {
           log(`  moving ${r}`);
-          methods.add(moveEntry(from, path.join(dirB, name), sys, ctx).method);
+          const moved = moveEntry(from, path.join(dirB, name), sys, ctx);
+          methods.add(moved.method);
           done.push({ from, to: path.join(dirB, name) });
+          if (moved.left) left(moved.left);
         }
       }
     };
@@ -203,10 +222,14 @@ function execute(model, opts, sys, env, log, steps) {
     // links that pointed into the old folder now point into the new one (or, in a part, at the same place by its new path)
     retargetLinks(B, A, { from: A, to: B });
     for (const p of T.parts) retargetLinks(p.to, p.from, { from: A, to: B, absoluteInside: true });
-    try { fs.rmdirSync(A); } catch { warnings.push(`${A} still holds files that were not moved.`); }
+    try { fs.rmdirSync(A); } catch { if (!leftBehind) warnings.push(`${A} still holds files that were not moved.`); }
     fs.utimesSync(B, stA.atimeMs / 1000, stA.mtimeMs / 1000);
     return methods.size === 1 ? [...methods][0] : "mixed";
   }
+
+  // Only the copy of a single folder leaves the originals where they are until step 5 removes them. A split moves
+  // its parts one by one (each original goes as its copy is checked), so .claude.json has to go with them.
+  const originalsStay = (m) => T.mode === "single" && m === "copy";
 
   // Puts the data back as it was, for a failure before the new place is in use.
   let jsonMoved = false;
@@ -215,7 +238,7 @@ function execute(model, opts, sys, env, log, steps) {
     // a failure inside the single-folder rename or copy has already cleaned up after itself
     if (T.mode === "single" && method === undefined) return;
     try {
-      if (jsonMoved && method !== "copy") {
+      if (jsonMoved && !originalsStay(method)) {
         // .claude.json goes back next to the folder, and the folder's own old one gets its name back
         moveFile(path.join(B, CLAUDE_JSON), AJ, sys);
         if (stale) fs.renameSync(path.join(B, stale), path.join(B, CLAUDE_JSON));
@@ -224,20 +247,29 @@ function execute(model, opts, sys, env, log, steps) {
         // the folder goes back first; its manifest is put right afterwards (the one an earlier move left, or none)
         sys.rename(B, A);
         retargetLinks(A, B, { from: B, to: A });
+        restoreRelativeLinks(A, relativeLinks);
         try { if (previousManifest) writeManifest(A, previousManifest); else fs.rmSync(path.join(A, MANIFEST_NAME), { force: true }); } catch { /* the manifest is not data */ }
         if (T.existedBefore) fs.mkdirSync(B);
       } else if (T.mode === "single") {
         if (T.existedBefore) emptyB(); else removeTree(B);
       } else {
+        // each entry on its own: one that cannot come back must not keep the others from coming back
+        let allBack = true;
         for (const d of [...done].reverse()) {
-          if (d.link) fs.rmSync(d.link, { force: true });
-          else {
+          if (d.link) { fs.rmSync(d.link, { force: true }); continue; }
+          try {
             moveEntry(d.to, d.from, sys, { ...ctx, rewrite: { from: B, to: A } });
             for (const base of [T.state, T.cache]) if (base) removeEmptyParents(path.dirname(d.to), base);
+          } catch (err) {
+            allBack = false;
+            warnings.push(`Could not put ${d.to} back at ${d.from} (${err.code || err.message}); it is still in ${d.to}.`);
           }
         }
         if (!exists(A)) fs.mkdirSync(A);
-        if (!T.existedBefore) removeTree(B);
+        // the links that were re-aimed at the new place go back to the old one (a rename does not touch links)
+        try { retargetLinks(A, B, { from: B, to: A }); restoreRelativeLinks(A, relativeLinks); } catch { /* the links are not data */ }
+        // B goes only when everything has come back: otherwise what is in it is data. Else it holds the empty folders the walk made.
+        if (allBack) { if (T.existedBefore) emptyB(); else removeTree(B); }
       }
     } catch (e) {
       warnings.push(`Could not put everything back after the failure (${e.code || e.message}). Look in ${B} and ${A}.`);
@@ -267,7 +299,7 @@ function execute(model, opts, sys, env, log, steps) {
       }
       log(`  moving ${AJ} into ${B}`);
       try {
-        moveFile(AJ, dst, sys, { keepOriginal: method === "copy" });
+        moveFile(AJ, dst, sys, { keepOriginal: originalsStay(method) });
       } catch (e) {
         if (keep && !exists(dst)) fs.renameSync(keep, dst);
         stale = null;
@@ -289,7 +321,7 @@ function execute(model, opts, sys, env, log, steps) {
     parts: T.parts.map((p) => ({ path: p.path, area: p.area, from: p.from, to: p.to, link: p.link })),
     stale: stale ? { claudeJson: stale } : null,
     bytes: carried.bytes, files: carried.files, sessions: { sessions: carried.sessions, projects: carried.projects },
-    profiles: [], registry: null, links: links.slice(),
+    profiles: [], registry: null, links: links.slice(), relativeLinks, leftBehind: leftBehind || undefined,
     options: { link: !!opts.link, noEnv: !!opts.noEnv, xdg: !!opts.xdg },
     previous: previousManifest,
   });
@@ -321,18 +353,40 @@ function execute(model, opts, sys, env, log, steps) {
       } else failed(`Could not set CLAUDE_CONFIG_DIR in the Windows user environment: ${w.error}. Set it to ${B} yourself.`);
     }
   }
-  writeManifest(B, manifest);
+  // From here on the data is in its new place: a manifest write that fails is a note and not a rollback.
+  const saveManifest = () => {
+    try {
+      writeManifest(B, manifest);
+    } catch (e) {
+      const unlisted = [...manifest.profiles.map((p) => p.file), ...manifest.links.filter((l) => l.purpose !== "xdg").map((l) => l.path)];
+      if (manifest.registry) unlisted.push(`CLAUDE_CONFIG_DIR in the Windows user environment (${manifest.registry.key})`);
+      failed(`Could not write ${manifestFile(B)} again (${e.code || e.message}).${unlisted.length ? ` It does not list what this move did after the data moved, so undo will not take it out: ${unlisted.join("; ")}. Take the lines between "# claude-relocate start" and "# claude-relocate end" out of each profile, and remove the links and the Windows value, by hand.` : ""}`);
+    }
+  };
+  if (manifest.profiles.length || manifest.registry) saveManifest();
 
   // ---- 6. the original goes; a link may take its place ----
+  // The original may have changed while the copy was made (Claude Code started meanwhile): the copy then lacks that,
+  // and the original stays where it is.
+  let changedWhileCopying = null;
   if (T.mode === "single" && method === "copy") {
+    const nowA = compareSnapshots(snapA, snapshot(A));
+    const nowJson = jsonOutside ? fileRow(AJ) : null;
+    if (!nowA.ok) changedWhileCopying = `${A} (${nowA.count} difference${nowA.count === 1 ? "" : "s"}, the first at ${nowA.mismatches[0].path})`;
+    else if (jsonOutside && (!nowJson || !rowAJ || nowJson.size !== rowAJ.size || Math.abs(nowJson.mtimeMs - rowAJ.mtimeMs) > TIME_TOLERANCE_MS)) changedWhileCopying = AJ;
+  }
+  if (changedWhileCopying) {
+    manifest.originalKept = true;
+    failed(`${changedWhileCopying} changed while it was being copied, so the original was not removed. The copy in ${B} is ${A} as it was when the move began. Close Claude Code and the Claude desktop app, compare the two, and delete the old one by hand when ${B} has everything you want, or run undo.`);
+  } else if (T.mode === "single" && method === "copy") {
     log(`  removing the original ${A}`);
     const aside = uniquePath(`${A}.claude-relocate-old`);
     let target = A;
     try { fs.renameSync(A, aside); target = aside; } catch { /* something holds it: remove it where it is */ }
-    try {
-      removeTree(target);
-    } catch (e) {
-      failed(`Could not remove all of ${target} (${e.code || e.message}). Everything is in ${B}; delete what is left by hand.`);
+    const stuck = removeWhatYouCan(target);
+    if (stuck.length) {
+      manifest.leftBehind = stuck.length;
+      failed(`Could not remove ${describeLeft(stuck)} from ${target}. Everything is in ${B}; delete what is left by hand.`);
     }
     if (jsonOutside) {
       try { fs.rmSync(AJ, { force: true }); } catch (e) { failed(`Could not remove ${AJ} (${e.code || e.message}).`); }
@@ -345,8 +399,8 @@ function execute(model, opts, sys, env, log, steps) {
         manifest.links.push({ path: A, target: B, kind: "dir", purpose: "origin" });
         log(`  linked ${A} to ${B}`);
       } catch (e) { failed(`Could not link ${A} to ${B} (${e.code || e.message}).`); }
-    } else failed(`${A} still exists, so it was not replaced by a link.`);
-    if (jsonOutside) {
+    } else if (!changedWhileCopying) failed(`${A} still exists, so it was not replaced by a link.`);
+    if (jsonOutside && !changedWhileCopying) {
       try {
         makeLink(path.join(B, CLAUDE_JSON), AJ, "file");
         manifest.links.push({ path: AJ, target: path.join(B, CLAUDE_JSON), kind: "file", purpose: "claude-json" });
@@ -357,7 +411,7 @@ function execute(model, opts, sys, env, log, steps) {
     }
   }
   if (ctx.skipped.length) warnings.push(`${ctx.skipped.length} special file${ctx.skipped.length === 1 ? "" : "s"} (sockets or pipes) could not be copied and ${ctx.skipped.length === 1 ? "was" : "were"} left out: ${ctx.skipped.slice(0, 3).join(", ")}${ctx.skipped.length > 3 ? " ..." : ""}.`);
-  writeManifest(B, manifest);
+  saveManifest();
 
   return {
     ok: true, dryRun: false, plan: model, steps, method, mode: T.mode,

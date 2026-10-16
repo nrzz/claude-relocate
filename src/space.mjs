@@ -2,10 +2,10 @@
 // same drive (so a rename is enough and nothing needs copying).
 import fs from "node:fs";
 import path from "node:path";
-import { spawnSync } from "node:child_process";
+import { spawn } from "./spawn.mjs";
 import { nearestExisting } from "./util.mjs";
 
-const defaultRun = (cmd, args) => spawnSync(cmd, args, { encoding: "utf8", windowsHide: true, timeout: 30000 });
+const defaultRun = (cmd, args) => spawn(cmd, args, { encoding: "utf8", windowsHide: true, timeout: 30000 });
 
 // `df -Pk <path>` -> free bytes (the 4th column of the last line, in KB), or null.
 export function parseDf(text) {

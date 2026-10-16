@@ -401,3 +401,102 @@ test("undo is refused while the working folder is inside the folder it would mov
   assert.deepEqual(everything(w), before);
   assert.equal((await undoJson(atDest(w))).code, 0);
 });
+
+// Links into a dotfiles folder next to the config folder, with relative targets as GNU stow makes them, and one
+// relative link that stays inside the folder.
+function stowLike(w) {
+  put(path.join(w.base, "dotfiles", "CLAUDE.md"), "from dotfiles\n");
+  put(path.join(w.base, "dotfiles", "rules", "a.md"), "rule\n");
+  fs.symlinkSync(path.join("..", "dotfiles", "CLAUDE.md"), path.join(w.cfg, "linked.md"), "file");
+  fs.symlinkSync(path.join("..", "..", "dotfiles", "rules"), path.join(w.cfg, "skills", "rules"), "dir");
+  fs.symlinkSync(path.join("..", "..", "..", "dotfiles", "CLAUDE.md"), path.join(w.cfg, "projects", "-work-shop", "linked.md"), "file");
+  fs.symlinkSync(path.join("skills", "demo"), path.join(w.cfg, "inside"), "dir");
+  // relative and inside the folder, but in a folder that the --xdg split moves to the state folder
+  fs.symlinkSync(path.join("..", "..", "skills", "demo"), path.join(w.cfg, "projects", "-work-shop", "inside-link"), "dir");
+}
+
+for (const [n, name, over, split] of [[1, "by rename", {}, false], [2, "by copy to another drive", "copy", false], [3, "in the --xdg split", { platform: LINUX }, true]]) {
+  test(`relative links that leave the folder are written as absolute links by the move and come back as the same relative text on undo, ${name} (found by review)`, { skip: noFileLinks() }, async () => {
+    const w = fresh(`un21-${n}`, { platform: split ? LINUX : undefined });
+    stowLike(w);
+    const before = everything(w);
+    const sysOver = over === "copy" ? { rename: exdev, drive: secondDriveAt(w.dest) } : over;
+    const m = await mv(w, split ? ["--xdg"] : ["--to", w.dest], sysOver);
+    assert.equal(m.code, 0, m.all);
+    const dest = split ? w.xdg.config : w.dest;
+    assert.ok(path.isAbsolute(fs.readlinkSync(path.join(dest, "linked.md"))), "after the move the link is absolute, so that it keeps working");
+    assert.equal(read(dest, "linked.md"), "from dotfiles\n");
+    assert.equal(read(dest, "projects", "-work-shop", "linked.md"), "from dotfiles\n", "also inside a folder that went to the state folder");
+    assert.equal(fs.readlinkSync(path.join(dest, "inside")), path.join("skills", "demo"), "a relative link that stays inside is left as it is");
+    const links = manifestOfFile(dest).relativeLinks.map((l) => l.path).sort();
+    assert.deepEqual(links, ["linked.md", "projects/-work-shop/linked.md", ...(split ? ["projects/-work-shop/inside-link"] : []), "skills/rules"].sort(), "the links that had to be written as absolute links");
+    assert.equal(fs.existsSync(path.join(dest, "projects", "-work-shop", "inside-link", "SKILL.md")), true, "and the one inside works");
+    const u = await undoJson(atDest(w, dest), ["--yes"], sysOver);
+    assert.equal(u.code, 0, u.all);
+    assert.deepEqual(sameWorld(before, everything(w)), [], "the exact tree, link text included");
+  });
+}
+
+function manifestOfFile(dir) {
+  const r = readManifest(path.join(dir, MANIFEST));
+  assert.equal(r.ok, true, r.error);
+  return r.manifest;
+}
+
+// A sys.drive that follows links the way the system does: a link names the drive of what it leads to.
+function followingDrive(secondDir) {
+  const second = secondDriveAt(secondDir);
+  return (p) => {
+    let q = path.resolve(p);
+    for (;;) {
+      try { q = fs.realpathSync.native(q); break; } catch { const up = path.dirname(q); if (up === q) break; q = up; }
+    }
+    return second(q);
+  };
+}
+
+test("undo of a move --link to another drive plans a copy back and checks the room: the link names the new drive, the folder it sits in names the old one (found by review)", async () => {
+  const w = fresh("un22");
+  const before = everything(w);
+  const over = { rename: exdev, drive: followingDrive(w.dest) };
+  assert.equal((await mv(w, ["--to", w.dest, "--link"], over)).code, 0);
+  assert.ok(fs.lstatSync(w.cfg).isSymbolicLink());
+  const dry = await undoJson(atDest(w), ["--dry-run"], over);
+  assert.equal(dry.code, 0, dry.all);
+  assert.ok(dry.json.steps.some((s) => /copied and checked, then the copy in the new place is deleted: another drive/.test(s.text)), JSON.stringify(dry.json.steps));
+  const tight = await undoJson(atDest(w), ["--yes"], { ...over, free: () => 1000 });
+  assert.equal(tight.code, 1);
+  assert.match(tight.json.error, /Not enough free space at/);
+  assert.ok(fs.lstatSync(w.cfg).isSymbolicLink(), "and nothing was changed");
+  const u = await undoJson(atDest(w), ["--yes"], over);
+  assert.equal(u.code, 0, u.all);
+  assert.equal(u.json.method, "copy");
+  assert.deepEqual(sameWorld(before, everything(w)), []);
+});
+
+test("undo names an unfinished copy from an earlier undo, which a marker file shows, and does not call it something created after the move", async () => {
+  const w = fresh("un23");
+  assert.equal((await mv(w, ["--to", w.dest])).code, 0);
+  put(path.join(w.cfg, "projects", "half.txt"), "a copy that was interrupted\n");
+  put(path.join(w.cfg, ".claude-relocate-incomplete"), "claude-relocate is copying into this folder.\n");
+  const r = await undoJson(atDest(w), ["--yes"]);
+  assert.equal(r.code, 1);
+  assert.match(r.json.error, /holds an unfinished copy from an earlier undo, marked by a \.claude-relocate-incomplete file; delete the folder\)\. Move it away, then run this again\.$/);
+  assert.ok(lexists(path.join(w.dest, "settings.json")), "and everything is still in the new place");
+});
+
+test("undo puts the environment back even when a folder the move made cannot be looked into afterwards (found by review)", async () => {
+  const w = seedConfig(world("un24", { shell: "/bin/bash" }));
+  put(path.join(w.home, ".bashrc"), "# mine\n");
+  const made = path.join(w.base, "new");
+  const dest = path.join(made, "dest");
+  assert.equal((await mv(w, ["--to", dest])).code, 0);
+  assert.match(read(w.home, ".bashrc"), /claude-relocate start/);
+  const real = fs.readdirSync;
+  fs.readdirSync = (p, ...rest) => { if (path.resolve(String(p)) === made) throw Object.assign(new Error("EACCES: permission denied, scandir"), { code: "EACCES" }); return real.call(fs, p, ...rest); };
+  let u;
+  try { u = await undoJson(atDest(w, dest), ["--yes"]); } finally { fs.readdirSync = real; }
+  assert.equal(u.code, 0, u.all);
+  assert.equal(read(w.home, ".bashrc"), "# mine\n", "the block is out of the profile");
+  assert.ok(lexists(path.join(w.cfg, "settings.json")));
+});

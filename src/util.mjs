@@ -80,20 +80,59 @@ export function isEmptyDir(p) {
   try { return fs.readdirSync(p).length === 0; } catch { return false; }
 }
 
+// mkdir -p that leaves a folder alone when it is there already. Node's recursive mkdir throws EPERM for the root of a
+// drive (the parent of --to D:/claude, D: being a drive) even though that root exists. Returns the first folder made, or null.
+export function makeDirs(dir) {
+  try { if (fs.statSync(dir).isDirectory()) return null; } catch { /* not there yet */ }
+  return plainPath(fs.mkdirSync(dir, { recursive: true }) || null);
+}
+
+// Node names the folder it made first with the extended-length prefix on Windows; the plain form is what the rest of
+// this tool, and the manifest, use.
+function plainPath(p) {
+  const prefix = `${String.fromCharCode(92)}${String.fromCharCode(92)}?${String.fromCharCode(92)}`;
+  if (!p || !p.startsWith(prefix)) return p;
+  const rest = p.slice(prefix.length);
+  const unc = `UNC${String.fromCharCode(92)}`;
+  return rest.startsWith(unc) ? `${String.fromCharCode(92)}${String.fromCharCode(92)}${rest.slice(unc.length)}` : rest;
+}
+
 // Writes a file so a reader never sees half of it: a temporary name next to it, then a rename. A symbolic link
 // is written through, so the link stays a link.
 export function writeFileAtomic(file, text) {
-  fs.mkdirSync(path.dirname(file), { recursive: true });
+  makeDirs(path.dirname(file));
   const st = statOf(file);
   if (st && st.isSymbolicLink()) { fs.writeFileSync(file, text); return; }
   const tmp = `${file}.tmp-${process.pid}-${Date.now()}`;
   try {
     fs.writeFileSync(tmp, text, st ? { mode: st.mode & 0o7777 } : undefined);
-    fs.renameSync(tmp, file);
+    renameWithRetry(tmp, file);
   } catch (e) {
     try { fs.rmSync(tmp, { force: true }); } catch { /* nothing to clean */ }
     throw e;
   }
+}
+
+// Waits, without a timer (the callers are synchronous).
+export function sleepMs(ms) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+// A rename onto a file that a virus scanner or an indexer is looking at fails for a moment on Windows (EPERM, EBUSY,
+// EACCES): it is tried again a few times before the error is given.
+function renameWithRetry(from, to) {
+  for (let attempt = 0; ; attempt++) {
+    try { fs.renameSync(from, to); return; } catch (e) {
+      if (attempt >= 4 || !["EPERM", "EBUSY", "EACCES"].includes(e.code)) throw e;
+      sleepMs(50 * 2 ** attempt);
+    }
+  }
+}
+
+// "3 items (the first, C:/a/b: EPERM)" for what removeWhatYouCan could not remove.
+export function describeLeft(left) {
+  const first = left[0];
+  return left.length === 1 ? `1 item (${first.path}: ${first.error})` : `${left.length} items (the first, ${first.path}: ${first.error})`;
 }
 
 // `base` if nothing is there yet, else `base-2`, `base-3` ...

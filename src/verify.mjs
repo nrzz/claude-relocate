@@ -129,10 +129,13 @@ export function runVerify({ env, cwd, sys }) {
     const items = folder && folder.isDirectory() && !folder.isSymbolicLink() ? fs.readdirSync(M.origin.configDir).length : 0;
     const json = !M.origin.claudeJsonInside ? statOf(M.origin.claudeJson) : null;
     const jsonAgain = !!json && !json.isSymbolicLink();
+    // the manifest knows when the move itself left the old place as it is: that is not a program writing there
+    const kept = M.originalKept ? "the move kept it because it changed while it was being copied" : M.leftBehind ? `the move could not remove ${plural(M.leftBehind, "item")} of it` : null;
     const bits = [];
-    if (items) bits.push(`${M.origin.configDir} exists again and holds ${plural(items, "item")}`);
-    if (jsonAgain) bits.push(`${M.origin.claudeJson} was made again${items ? " next to it" : ""}`);
-    if (bits.length) add("old-place", "warn", `${bits.join(", and ")}; Claude Code now uses ${dest}. A program that ignores CLAUDE_CONFIG_DIR may be writing there; undo refuses while ${bits.length > 1 ? "they are" : "it is"} there; move --link makes such programs use the new folder.`, { path: M.origin.configDir });
+    if (items) bits.push(kept ? `${M.origin.configDir} still holds ${plural(items, "item")} (${kept})` : `${M.origin.configDir} exists again and holds ${plural(items, "item")}`);
+    if (jsonAgain) bits.push(M.originalKept ? `${M.origin.claudeJson} was kept with it` : `${M.origin.claudeJson} was made again${items ? " next to it" : ""}`);
+    const advice = kept ? "Delete what is left by hand once you do not need it" : "A program that ignores CLAUDE_CONFIG_DIR may be writing there";
+    if (bits.length) add("old-place", "warn", `${bits.join(", and ")}; Claude Code now uses ${dest}. ${advice}; undo refuses while ${bits.length > 1 ? "they are" : "it is"} there${kept ? "." : "; move --link makes such programs use the new folder."}`, { path: M.origin.configDir });
   }
 
   // the real claude

@@ -4,8 +4,8 @@
 // different drives (EXDEV), or because something holds a file open, falls back to the copy.
 import fs from "node:fs";
 import path from "node:path";
-import { UserError, exists, statOf } from "./util.mjs";
-import { compareSnapshots, copyTree, fileRow, removeTree, snapshot } from "./walk.mjs";
+import { UserError, exists, makeDirs, statOf } from "./util.mjs";
+import { compareSnapshots, copyTree, fileRow, removeTree, removeWhatYouCan, snapshot } from "./walk.mjs";
 
 // Rename errors after which a copy may still work.
 export const COPY_INSTEAD = new Set(["EXDEV", "EPERM", "EACCES", "EBUSY"]);
@@ -42,11 +42,14 @@ export function copyAndVerify(src, dst, ctx) {
 }
 
 // Moves src to dst. dst's folder is created; dst itself must not exist, or be an empty folder.
-// Returns { method: "rename" | "copy", bytes, files }. ctx: see copyTree. sys: rename and copyFile.
+// Returns { method: "rename" | "copy", bytes, files, left? }. ctx: see copyTree. sys: rename and copyFile.
+// `left` is what a copy could not remove from src afterwards ([{ path, error }]): the copy is whole and checked by
+// then, so the entry has moved, and the caller says what stays behind. (Taking the copy away again would lose the
+// files the removal had already deleted.)
 // After a rename, links inside that point into the old place are NOT re-aimed here (the caller does that once, when
 // everything it moves has arrived: see retargetLinks in walk.mjs); a copy re-aims them as it goes.
 export function moveEntry(src, dst, sys, ctx) {
-  fs.mkdirSync(path.dirname(dst), { recursive: true });
+  makeDirs(path.dirname(dst));
   const before = snapshotAny(src);
   const emptyDirInTheWay = exists(dst);
   if (emptyDirInTheWay) fs.rmdirSync(dst);
@@ -65,8 +68,15 @@ export function moveEntry(src, dst, sys, ctx) {
     }
   }
   copyAndVerify(src, dst, ctx);
-  removeTree(src);
-  return { method: "copy", bytes: before.bytes, files: before.files };
+  // the original may have changed while the copy was made (a program started meanwhile): the copy then lacks that,
+  // and the original must stay as it is
+  const again = compareSnapshots(before, snapshotAny(src));
+  if (!again.ok) {
+    try { removeTree(dst); } catch { /* best effort: the copy was ours */ }
+    throw new UserError(`${src} changed while it was being copied (${again.count} difference${again.count === 1 ? "" : "s"}, the first at ${again.mismatches[0].path || path.basename(src)}), so nothing was removed from it. Close Claude Code and the Claude desktop app, then run this again.`, "changed-during-copy");
+  }
+  const left = removeWhatYouCan(src);
+  return { method: "copy", bytes: before.bytes, files: before.files, ...(left.length ? { left } : {}) };
 }
 
 // Copies the contents of a folder into a folder that exists (empty), keeping the times of both.
@@ -80,12 +90,12 @@ export function copyChildren(src, dstDir, ctx) {
   fs.utimesSync(dstDir, st.atimeMs / 1000, st.mtimeMs / 1000);
 }
 
-// A single file: rename, else copy, check the size, and remove the original (`keepOriginal` leaves it, for a
-// move that removes everything at the end).
+// A single file: rename, else copy, check the size, and remove the original. `keepOriginal` leaves it, for a move
+// that removes everything at the end, and so never renames (a rename would take the original away at once).
 export function moveFile(src, dst, sys, { keepOriginal = false, forceCopy = false } = {}) {
   const row = fileRow(src);
-  fs.mkdirSync(path.dirname(dst), { recursive: true });
-  if (!forceCopy) {
+  makeDirs(path.dirname(dst));
+  if (!forceCopy && !keepOriginal) {
     try { sys.rename(src, dst); return { method: "rename", bytes: row ? row.size : 0 }; } catch (e) { if (!COPY_INSTEAD.has(e.code)) throw e; }
   }
   const st = fs.lstatSync(src);

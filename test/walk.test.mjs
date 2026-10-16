@@ -3,8 +3,8 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
-import { TIME_TOLERANCE_MS, compareSnapshots, copyTree, fileRow, makeLink, newTargetFor, pruneEmpty, removeEmptyParents, removeIfEmpty, removeTree, retargetLinks, snapshot } from "../src/walk.mjs";
-import { IS_WIN, lexists, put, tmpDir, tree } from "./helpers.mjs";
+import { TIME_TOLERANCE_MS, compareSnapshots, copyTree, fileRow, makeLink, newTargetFor, pruneEmpty, removeEmptyParents, removeIfEmpty, removeTree, removeWhatYouCan, restoreRelativeLinks, retargetLinks, snapshot } from "../src/walk.mjs";
+import { IS_WIN, lexists, noFileLinks, put, tmpDir, tree } from "./helpers.mjs";
 
 const T0 = Date.parse("2026-08-01T12:34:56.789Z");
 
@@ -329,4 +329,60 @@ test("removeEmptyParents walks up from a folder, removing the empty ones, and ne
   removeEmptyParents(path.join(dir, "elsewhere"), base);
   removeEmptyParents(path.join(dir), base);
   assert.ok(lexists(dir), "a folder outside the stop's tree is not touched");
+});
+
+test("removeWhatYouCan removes a whole tree in one go when it can, and says nothing is left", () => {
+  const dir = sample(tmpDir());
+  assert.deepEqual(removeWhatYouCan(dir), []);
+  assert.ok(!lexists(dir));
+  assert.deepEqual(removeWhatYouCan(dir), [], "what is not there is removed already");
+});
+
+test("removeWhatYouCan goes on after a file that cannot be removed and says what is left: that file, and the folders above it", () => {
+  const dir = sample(tmpDir());
+  put(path.join(dir, "dir", "sub", "locked.txt"), "held open");
+  const real = fs.rmSync;
+  const holdsLocked = (p) => { const st = fs.lstatSync(p); return st.isDirectory() && !st.isSymbolicLink() ? fs.readdirSync(p).some((n) => holdsLocked(path.join(p, n))) : path.basename(p) === "locked.txt"; };
+  // like Windows with a file another program has open: removing it, or a folder with it inside, fails
+  fs.rmSync = (p, o) => { if (lexists(p) && holdsLocked(p)) throw Object.assign(new Error("EPERM: operation not permitted, unlink"), { code: "EPERM" }); return real.call(fs, p, o); };
+  let left;
+  try { left = removeWhatYouCan(dir); } finally { fs.rmSync = real; }
+  assert.deepEqual(left.map((l) => [path.relative(dir, l.path), l.error]), [[path.join("dir", "sub", "locked.txt"), "EPERM"]]);
+  assert.deepEqual(Object.keys(tree(dir)).sort(), ["dir", "dir/sub", "dir/sub/locked.txt"], "everything else is gone");
+  assert.deepEqual(removeWhatYouCan(dir), [], "and once the file is free, the rest goes");
+  assert.ok(!lexists(dir));
+});
+
+test("compareSnapshots does not call a socket or a pipe that is missing from a copy a difference: a copy leaves them out on purpose", () => {
+  const file = { t: "f", size: 1, mtimeMs: 0 };
+  const before = { entries: new Map([["f", file], ["pipe", { t: "o", size: 0, mtimeMs: 0 }]]) };
+  const after = { entries: new Map([["f", file]]) };
+  assert.equal(compareSnapshots(before, after).ok, true);
+  assert.equal(compareSnapshots(after, before).ok, false, "one that is in the copy only is something extra");
+});
+
+test("restoreRelativeLinks writes the old relative text back into a link that was made absolute, only while it points to the same place", { skip: noFileLinks() }, () => {
+  const dir = tmpDir();
+  const root = path.join(dir, "cfg");
+  for (const n of ["a", "b", "c"]) put(path.join(dir, "dotfiles", `${n}.md`), n);
+  fs.mkdirSync(path.join(root, "sub"), { recursive: true });
+  // what a move leaves behind: absolute links
+  fs.symlinkSync(path.join(dir, "dotfiles", "a.md"), path.join(root, "a.md"), "file");
+  fs.symlinkSync(path.join(dir, "dotfiles", "b.md"), path.join(root, "sub", "b.md"), "file");
+  fs.symlinkSync(path.join(dir, "dotfiles", "c.md"), path.join(root, "c.md"), "file");
+  const records = [
+    { path: "a.md", was: path.join("..", "dotfiles", "a.md") },
+    { path: "sub/b.md", was: path.join("..", "..", "dotfiles", "b.md") },
+    { path: "c.md", was: path.join("..", "dotfiles", "other.md") }, // it points somewhere else now than `was` would
+    { path: "missing.md", was: path.join("..", "dotfiles", "a.md") },
+    { path: "../escape.md", was: "x" },
+    { path: "a.md" },
+  ];
+  assert.deepEqual(restoreRelativeLinks(root, records), { restored: 2, failed: 0 });
+  assert.equal(fs.readlinkSync(path.join(root, "a.md")), path.join("..", "dotfiles", "a.md"));
+  assert.equal(fs.readlinkSync(path.join(root, "sub", "b.md")), path.join("..", "..", "dotfiles", "b.md"));
+  assert.equal(fs.readFileSync(path.join(root, "sub", "b.md"), "utf8"), "b", "and it still works");
+  assert.equal(fs.readlinkSync(path.join(root, "c.md")), path.join(dir, "dotfiles", "c.md"), "a link that points elsewhere is not touched");
+  assert.deepEqual(restoreRelativeLinks(root, records), { restored: 0, failed: 0 }, "nothing is left to do the second time");
+  assert.deepEqual(restoreRelativeLinks(root, undefined), { restored: 0, failed: 0 });
 });

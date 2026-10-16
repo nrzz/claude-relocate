@@ -109,7 +109,8 @@ export function compareSnapshots(before, after, { rewrite = null, tolerance = TI
   for (const [rel, a] of before.entries) {
     if (ignore(rel)) continue;
     const b = after.entries.get(rel);
-    if (!b) { add({ path: rel, problem: "missing from the copy" }); continue; }
+    // a socket or a pipe is left out of a copy on purpose (copyTree lists it in ctx.skipped), so it is not missing
+    if (!b) { if (a.t !== "o") add({ path: rel, problem: "missing from the copy" }); continue; }
     if (a.t !== b.t) { add({ path: rel, problem: `is a ${KIND_NAME[a.t]} in the original and a ${KIND_NAME[b.t]} in the copy` }); continue; }
     if (a.t === "f") {
       if (a.size !== b.size) add({ path: rel, problem: `size ${a.size} became ${b.size}` });
@@ -157,6 +158,41 @@ export function retargetLinks(root, oldRoot, rewrite) {
   };
   walk(root, oldRoot);
   return n;
+}
+
+// After a folder has come back (an undo, or a move that is put back), writes the old text into the relative links that
+// the move had to make absolute: records is [{ path: below root, with "/", was: the text the link had }]. A link is
+// touched only if it still points where `was` points; one that was changed since, or cannot be made again, stays as
+// it is. Returns { restored, failed }.
+export function restoreRelativeLinks(root, records) {
+  let restored = 0;
+  let failed = 0;
+  for (const r of Array.isArray(records) ? records : []) {
+    if (!r || typeof r.path !== "string" || typeof r.was !== "string" || !r.was) continue;
+    const link = path.join(root, ...r.path.split("/"));
+    if (!isInside(root, link)) continue;
+    const st = statOf(link);
+    if (!st || !st.isSymbolicLink()) continue;
+    let now;
+    try { now = fs.readlinkSync(link); } catch { continue; }
+    if (now === r.was) continue;
+    const dir = path.dirname(link);
+    if (!samePath(path.resolve(dir, now), path.resolve(dir, r.was))) continue;
+    try {
+      fs.rmSync(link, { force: true });
+      try {
+        fs.symlinkSync(r.was, link, linkTypeOf(r.was, dir));
+      } catch (e) {
+        fs.symlinkSync(now, link, linkTypeOf(now, dir));
+        throw e;
+      }
+      try { fs.lutimesSync(link, st.atimeMs / 1000, st.mtimeMs / 1000); } catch { /* link times are best effort */ }
+      restored++;
+    } catch {
+      failed++;
+    }
+  }
+  return { restored, failed };
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -228,6 +264,29 @@ export function removeTree(p) {
     openUp(p);
     fs.rmSync(p, opts);
   }
+}
+
+// Removes what can be removed of p, and goes on after a file that cannot be (a file another program holds open stops
+// a plain removal at that file, with the rest of the folder still there). Returns what is left, [{ path, error }]:
+// empty when p is gone.
+export function removeWhatYouCan(p) {
+  try { removeTree(p); return []; } catch { /* piece by piece, below */ }
+  const left = [];
+  const go = (q) => {
+    const st = statOf(q);
+    if (!st) return true;
+    if (st.isDirectory() && !st.isSymbolicLink()) {
+      if (!IS_WIN) { try { fs.chmodSync(q, (st.mode & 0o7777) | 0o700); } catch { /* not ours */ } }
+      let names;
+      try { names = fs.readdirSync(q); } catch (e) { left.push({ path: q, error: e.code || e.message }); return false; }
+      let clean = true;
+      for (const name of names) if (!go(path.join(q, name))) clean = false;
+      if (!clean) return false;
+    }
+    try { removeTree(q); return true; } catch (e) { left.push({ path: q, error: e.code || e.message }); return false; }
+  };
+  go(p);
+  return left;
 }
 
 // Removes a folder if it is empty. Returns whether it is gone.

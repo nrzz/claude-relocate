@@ -118,10 +118,10 @@ test("exit codes: 0 when nothing is wrong, 1 when refused or something is wrong,
   assert.equal((await run(["nope"], w)).code, 2);
   const broken = w.sys({ processes: () => { throw new TypeError("boom"); } });
   const r = await run(["plan"], w, { sys: broken });
-  assert.equal(r.code, 2);
+  assert.equal(r.code, 1, "an error of the program's own is not 'wrong usage' (2)");
   assert.match(r.err, /^✗ claude-relocate hit an unexpected error: TypeError: boom/);
   const j = await run(["plan", "--json"], w, { sys: broken });
-  assert.equal(j.code, 2);
+  assert.equal(j.code, 1);
   assert.match(JSON.parse(j.out).error, /^claude-relocate hit an unexpected error: boom$/);
 });
 

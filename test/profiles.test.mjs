@@ -379,3 +379,53 @@ test("a profile that is not UTF-8 text is planned as skip, and writeProfile and 
   assert.match(removed.note, /^is not UTF-8 text .*, so it is left alone$/);
   assert.ok(fs.readFileSync(file).equals(latin));
 });
+
+test("a folder name with a line separator or another unusual space (U+2028, U+2029, U+0085, U+00A0) is read back by every syntax (found by review)", () => {
+  for (const v of ["/a\u2028b", "/a\u2029b", "/a\u0085b", "/a\u00a0b"]) {
+    for (const syntax of ["posix", "fish", "powershell"]) assert.equal(parseAssignment(syntax, blockLines(syntax, v)[1]), v, `${syntax} ${JSON.stringify(v)}`);
+  }
+});
+
+test("an existing PowerShell profile that is empty or only ASCII gets a byte-order mark with a non-ASCII folder name; undo takes it out again and the file is as it was (found by review)", () => {
+  const w = world("psbom2");
+  const value = ["D:", "Caf\u00e9 Donn\u00e9es", "claude \u65e5\u672c"].join(path.sep);
+  for (const original of ["", "# my profile\r\nSet-Alias ll Get-ChildItem\r\n", "no final line break"]) {
+    const file = path.join(w.home, "Documents", "WindowsPowerShell", `profile-${original.length}.ps1`);
+    put(file, original);
+    const rec = writeProfile({ shell: "powershell", syntax: "powershell", file }, value, { home: w.home });
+    assert.equal(rec.created, false);
+    assert.equal(rec.markAdded, true);
+    const written = fs.readFileSync(file, "utf8");
+    assert.ok(written.startsWith("\uFEFF"));
+    assert.equal(blockValue(written, "powershell"), value);
+    const out = removeProfile(rec, {});
+    assert.equal(out.removed, true);
+    assert.equal(fs.readFileSync(file, "utf8"), original, "no mark and no block: the file is as it was");
+  }
+});
+
+test("an ASCII folder name adds no byte-order mark; a profile with non-ASCII text and no mark is not written for a non-ASCII name, and no backup is left (found by review)", () => {
+  const w = world("psbom3");
+  const file = path.join(w.home, "profile.ps1");
+  const original = "# caf\u00e9\r\n";
+  put(file, original);
+  assert.throws(() => writeProfile({ shell: "powershell", syntax: "powershell", file }, ["D:", "Caf\u00e9"].join(path.sep), { home: w.home }), { code: "profile-encoding" });
+  assert.equal(fs.readFileSync(file, "utf8"), original, "untouched");
+  assert.deepEqual(fs.readdirSync(w.home).filter((n) => n.includes("bak-claude-relocate")), [], "and no backup is left behind");
+  const rec = writeProfile({ shell: "powershell", syntax: "powershell", file }, "D:/claude", { home: w.home });
+  assert.equal(rec.markAdded, false);
+  assert.ok(!fs.readFileSync(file, "utf8").startsWith("\uFEFF"));
+});
+
+test("Windows PowerShell 5.1 brings back a non-ASCII folder name from an existing profile that was empty or ASCII (the real shell reads what was written)", { skip: !(IS_WIN && onPath("powershell", ["-NoProfile", "-Command", "1"])) && "needs Windows PowerShell" }, () => {
+  const w = world("psbom4");
+  const value = ["D:", "Caf\u00e9 Donn\u00e9es", "claude \u65e5\u672c"].join(path.sep);
+  for (const original of ["", "# my profile\r\n"]) {
+    const file = path.join(w.home, `p${original.length}.ps1`);
+    put(file, original);
+    writeProfile({ shell: "powershell", syntax: "powershell", file }, value, { home: w.home });
+    const r = viaShell("powershell", file);
+    assert.equal(r.status, 0, r.stderr);
+    assert.equal(r.stdout, value);
+  }
+});

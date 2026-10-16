@@ -7,7 +7,7 @@
 // is not found.
 // Linux and macOS: `ps -A -o pid=,comm=` for a process called claude, and `ps -A -o pid=,args=` for a node
 // process running @anthropic-ai/claude-code/....
-import { spawnSync } from "node:child_process";
+import { spawn } from "./spawn.mjs";
 
 export const isClaudeName = (name) => /^claude(\.exe)?$/i.test(String(name).trim());
 
@@ -62,7 +62,7 @@ export function parsePsArgs(text) {
 
 const NODE_CLAUDE = /[\\/]@anthropic-ai[\\/]claude-code[\\/]/;
 
-const defaultRun = (cmd, args) => spawnSync(cmd, args, { encoding: "utf8", windowsHide: true, timeout: 30000, maxBuffer: 64 * 1024 * 1024 });
+const defaultRun = (cmd, args) => spawn(cmd, args, { encoding: "utf8", windowsHide: true, timeout: 30000, maxBuffer: 64 * 1024 * 1024 });
 
 // { ok: true, processes: [{ pid, name }] } or { ok: false, error }. `run(cmd, args)` returns what spawnSync does.
 export function listClaudeProcesses({ platform = process.platform, run = defaultRun, self = process.pid } = {}) {

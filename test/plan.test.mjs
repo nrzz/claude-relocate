@@ -433,3 +433,47 @@ test("a working folder inside the config folder is a warning for plan and a refu
   const ok = await runJson(["move", "--to", w.dest, "--yes"], w, { cwd: w.base, sys: w.sys() });
   assert.equal(ok.code, 0, ok.all);
 });
+
+test("--to a new folder below a link to a real folder is fine (~/.config may be a link to a dotfiles folder); below a link that leads nowhere it is refused (found by review)", () => {
+  const w = seedConfig(world("plan30"));
+  const real = path.join(w.base, "bigdisk", "config");
+  fs.mkdirSync(real, { recursive: true });
+  const link = path.join(w.base, "configlink");
+  fs.symlinkSync(real, link, IS_WIN ? "junction" : "dir");
+  assert.deepEqual(codes(plan(w, { to: path.join(link, "claude") })), []);
+  assert.deepEqual(codes(plan(w, { to: path.join(link, "sub", "claude") })), []);
+  assert.deepEqual(codes(plan({ ...w, env: { ...w.env, XDG_CONFIG_HOME: link } }, { xdg: true })), [], "also when XDG_CONFIG_HOME is that link");
+  const gone = path.join(w.base, "gone");
+  const dead = path.join(w.base, "deadlink");
+  fs.mkdirSync(gone);
+  fs.symlinkSync(gone, dead, IS_WIN ? "junction" : "dir");
+  fs.rmdirSync(gone);
+  const m = plan(w, { to: path.join(dead, "claude") });
+  assert.deepEqual(codes(m), ["destination-is-link"]);
+  assert.match(m.problems[0].message, /cannot be created: .* is a link that leads nowhere\.$/);
+});
+
+test("--xdg refuses a state or cache folder that is the config folder or holds it or is inside it: the parts are linked from one to the other (found by review)", () => {
+  const w = seedConfig(world("plan31", { platform: LINUX }));
+  const same = buildPlan({ env: { ...w.env, XDG_STATE_HOME: path.join(w.base, "xdg", "config") }, cwd: w.base, sys: w.sys(), opts: { xdg: true } });
+  assert.deepEqual(codes(same), ["xdg-overlap"]);
+  assert.match(same.problems[0].message, /^The state folder .* and the config folder .* are the same folder, or one is inside the other\. Set XDG_STATE_HOME and XDG_CONFIG_HOME to places that are apart\.$/);
+  const inside = buildPlan({ env: { ...w.env, XDG_CACHE_HOME: path.join(w.xdg.config, "cache") }, cwd: w.base, sys: w.sys(), opts: { xdg: true } });
+  assert.deepEqual(codes(inside), ["xdg-overlap"]);
+  assert.match(inside.problems[0].message, /^The cache folder /);
+  const around = buildPlan({ env: { ...w.env, XDG_STATE_HOME: path.join(w.base, "s"), XDG_CONFIG_HOME: path.join(w.base, "s", "claude", "cfg") }, cwd: w.base, sys: w.sys(), opts: { xdg: true } });
+  assert.deepEqual(codes(around), ["xdg-overlap"], "the config folder inside the state folder");
+  assert.deepEqual(codes(plan(w, { xdg: true })), [], "the usual three folders are apart");
+});
+
+test("--to an existing folder that cannot be listed is refused with a reason, not a crash (found by review)", () => {
+  const w = seedConfig(world("plan32"));
+  const dest = path.join(w.base, "locked");
+  put(path.join(dest, "x"), "x");
+  const real = fs.readdirSync;
+  fs.readdirSync = (p, ...rest) => { if (path.resolve(String(p)) === dest) throw Object.assign(new Error("EACCES: permission denied, scandir"), { code: "EACCES" }); return real.call(fs, p, ...rest); };
+  let m;
+  try { m = plan(w, { to: dest }); } finally { fs.readdirSync = real; }
+  assert.deepEqual(codes(m), ["destination-unreadable"]);
+  assert.match(m.problems[0].message, /exists and cannot be read\. Choose a new or empty folder\.$/);
+});

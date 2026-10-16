@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
-import { UsageError, UserError, cmp, count, exists, fail, fileStamp, forwardSlashes, fold, isEmptyDir, isInside, isoOf, listDir, localDay, makeColors, nearestExisting, plural, realLoose, resolveFolder, samePath, size, statOf, tryParse, uniquePath, writeFileAtomic } from "../src/util.mjs";
+import { UsageError, UserError, cmp, count, describeLeft, exists, fail, fileStamp, forwardSlashes, fold, isEmptyDir, isInside, isoOf, listDir, localDay, makeColors, makeDirs, nearestExisting, plural, realLoose, resolveFolder, samePath, size, statOf, tryParse, uniquePath, writeFileAtomic } from "../src/util.mjs";
 import { IS_WIN, lexists, noFileLinks, put, tmpDir } from "./helpers.mjs";
 
 test("size writes bytes, KB, MB, GB and TB the way a person reads them", () => {
@@ -197,4 +197,48 @@ test("nearestExisting is the path itself when it is there, else the deepest fold
   put(path.join(dir, "file"), "x");
   assert.equal(nearestExisting(path.join(dir, "file", "below")), path.join(dir, "file"), "a file counts: the caller decides what to do with it");
   assert.ok(lexists(nearestExisting(path.join(path.parse(dir).root, "no-such-folder-for-sure", "x"))));
+});
+
+test("makeDirs makes the folders that are missing and says where it began; a folder that is there is left alone, also the top of a drive", () => {
+  const dir = tmpDir();
+  assert.equal(makeDirs(dir), null, "nothing to make");
+  assert.equal(makeDirs(path.join(dir, "a", "b", "c")), path.join(dir, "a"), "the first folder it made, in the plain form of the path");
+  assert.ok(fs.statSync(path.join(dir, "a", "b", "c")).isDirectory());
+  assert.equal(makeDirs(path.join(dir, "a", "b", "c")), null);
+  // Node's own recursive mkdir throws EPERM for the root of a drive on Windows, and that root is the parent of --to D:/claude
+  assert.equal(makeDirs(path.parse(dir).root), null);
+  const link = path.join(dir, "link");
+  fs.symlinkSync(path.join(dir, "a"), link, IS_WIN ? "junction" : "dir");
+  assert.equal(makeDirs(link), null, "a link to a folder is a folder");
+  assert.equal(makeDirs(path.join(link, "new")), path.join(link, "new"));
+  assert.ok(fs.statSync(path.join(dir, "a", "new")).isDirectory(), "made through the link");
+  put(path.join(dir, "file"), "x");
+  assert.throws(() => makeDirs(path.join(dir, "file")), { code: "EEXIST" });
+  assert.throws(() => makeDirs(path.join(dir, "file", "below")));
+});
+
+test("describeLeft names how many items could not be removed, and the first", () => {
+  assert.equal(describeLeft([{ path: "/a/b", error: "EPERM" }]), "1 item (/a/b: EPERM)");
+  assert.equal(describeLeft([{ path: "/a/b", error: "EPERM" }, { path: "/a/c", error: "EBUSY" }]), "2 items (the first, /a/b: EPERM)");
+});
+
+test("writeFileAtomic tries a rename again when a scanner holds the file for a moment (EPERM, EBUSY, EACCES), and gives the error after five tries", () => {
+  const dir = tmpDir();
+  const file = path.join(dir, "m.json");
+  const realRename = fs.renameSync;
+  let calls = 0;
+  fs.renameSync = (a, b) => { if (++calls <= 2) throw Object.assign(new Error("EPERM: operation not permitted, rename"), { code: "EPERM" }); return realRename.call(fs, a, b); };
+  try { writeFileAtomic(file, "one\n"); } finally { fs.renameSync = realRename; }
+  assert.equal(fs.readFileSync(file, "utf8"), "one\n");
+  assert.equal(calls, 3);
+  calls = 0;
+  fs.renameSync = () => { calls++; throw Object.assign(new Error("EBUSY: resource busy or locked, rename"), { code: "EBUSY" }); };
+  try { assert.throws(() => writeFileAtomic(file, "two\n"), { code: "EBUSY" }); } finally { fs.renameSync = realRename; }
+  assert.equal(calls, 5);
+  assert.equal(fs.readFileSync(file, "utf8"), "one\n", "the old file is as it was");
+  assert.deepEqual(fs.readdirSync(dir), ["m.json"], "and no temporary file is left");
+  calls = 0;
+  fs.renameSync = () => { calls++; throw Object.assign(new Error("ENOENT: no such file or directory, rename"), { code: "ENOENT" }); };
+  try { assert.throws(() => writeFileAtomic(file, "three\n"), { code: "ENOENT" }); } finally { fs.renameSync = realRename; }
+  assert.equal(calls, 1, "any other error is given at once");
 });

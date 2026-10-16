@@ -98,14 +98,17 @@ export function renderMoved(r, { c }) {
   const T = r.plan.destination;
   const lines = [];
   lines.push(`${c.green("Moved")} ${r.plan.origin.configDir} to ${T.config}`);
-  lines.push(`  ${r.method === "rename" ? "renamed, not copied: both are on the same drive" : r.method === "copy" ? "copied and checked, then the original was removed" : "renamed where the drive is the same, copied where it is not"}`);
+  // the manifest knows when the old place was kept, or could not be emptied
+  const left = r.manifestData || {};
+  const copied = left.originalKept ? "copied and checked; the original was kept, because it changed while it was being copied" : left.leftBehind ? "copied and checked; the original was removed except for what the notes below name" : "copied and checked, then the original was removed";
+  lines.push(`  ${r.method === "rename" ? "renamed, not copied: both are on the same drive" : r.method === "copy" ? copied : "renamed where the drive is the same, copied where it is not"}`);
   lines.push(`  ${size(r.bytes)} in ${plural(r.files, "file")}: same files, same sizes, file times kept (checked)`);
   if (r.stale) lines.push(`  The folder's own older .claude.json is kept as ${r.stale} next to the live one.`);
   lines.push(`  manifest: ${r.manifest}`);
   for (const w of r.warnings) lines.push(`${c.yellow("note")}  ${w}`);
   lines.push("");
   lines.push(r.incomplete ? `${c.red("✗")} The move is done, but not everything around it worked (see the notes above).` : "Open a new terminal (this one keeps the environment it started with), then run: claude-relocate verify");
-  lines.push("To put everything back: claude-relocate undo");
+  lines.push(left.originalKept || left.leftBehind ? "To put everything back: delete what is left of the old place, as the notes say, then run claude-relocate undo" : "To put everything back: claude-relocate undo");
   return lines.join("\n");
 }
 

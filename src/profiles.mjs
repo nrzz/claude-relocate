@@ -10,12 +10,13 @@
 //   # claude-relocate end
 import fs from "node:fs";
 import path from "node:path";
-import { UserError, exists, fileStamp, statOf, uniquePath, writeFileAtomic, fail } from "./util.mjs";
+import { UserError, exists, fileStamp, makeDirs, statOf, uniquePath, writeFileAtomic, fail } from "./util.mjs";
 import { shellInUse } from "./env.mjs";
 
 export const START = "# claude-relocate start";
 export const END = "# claude-relocate end";
 export const VARIABLE = "CLAUDE_CONFIG_DIR";
+const NON_ASCII = /[^\x00-\x7f]/;
 
 // ---------------------------------------------------------------------------------------------
 // Quoting: a value with spaces, quotes or a dollar sign must come out of the shell as it went in.
@@ -46,7 +47,7 @@ export function blockLines(syntax, value) {
 export function parseAssignment(syntax, line) {
   const t = String(line).trim();
   if (syntax === "posix") {
-    const m = /^export CLAUDE_CONFIG_DIR=(.*)$/.exec(t);
+    const m = /^export CLAUDE_CONFIG_DIR=(.*)$/s.exec(t);
     if (!m) return null;
     let out = "";
     const rest = m[1];
@@ -61,7 +62,7 @@ export function parseAssignment(syntax, line) {
     return out;
   }
   if (syntax === "fish") {
-    const m = /^set -gx CLAUDE_CONFIG_DIR '((?:[^'\\]|\\.)*)'$/.exec(t);
+    const m = /^set -gx CLAUDE_CONFIG_DIR '((?:[^'\\]|\\.)*)'$/s.exec(t);
     return m ? m[1].replace(/\\(['\\])/g, "$1") : null;
   }
   const m = /^\$env:CLAUDE_CONFIG_DIR = '((?:[^'\u2018\u2019\u201a\u201b]|(['\u2018\u2019\u201a\u201b])\2)*)'$/.exec(t);
@@ -229,10 +230,15 @@ export function writeProfile(p, value, { home, now = Date.now() } = {}) {
   const isNew = !exists(p.file);
   let text = "";
   let backup = null;
+  // Windows PowerShell 5.1 reads a profile without a byte-order mark as ANSI, so a folder name with non-ASCII
+  // characters needs one. Adding it changes nothing else when the rest of the file is ASCII; a file that already has
+  // non-ASCII text and no mark is read as ANSI whatever is done here, and the name would come out wrong in it.
+  const needsMark = p.syntax === "powershell" && NON_ASCII.test(value);
   if (!isNew) {
     const r = readProfileText(p.file);
     if (!r.ok) throw new UserError(`${p.file} ${r.reason}, so it is left alone.`, "profile-encoding");
     text = r.text;
+    if (needsMark && !text.startsWith("\uFEFF") && NON_ASCII.test(text)) throw new UserError(`${p.file} has non-ASCII text and no byte-order mark, which Windows PowerShell 5.1 reads as ANSI, so the folder name would come out wrong in it`, "profile-encoding");
     backup = uniquePath(`${p.file}.bak-claude-relocate-${fileStamp(now)}`);
     fs.copyFileSync(p.file, backup);
   }
@@ -240,11 +246,11 @@ export function writeProfile(p, value, { home, now = Date.now() } = {}) {
   const applied = applyBlock(text, p.syntax, value, { defaultEol });
   const mkdirs = isNew ? missingParents(p.file) : [];
   let out = applied.text;
-  // Windows PowerShell 5.1 reads a profile without a byte-order mark as ANSI: a new file with a non-ASCII path needs one.
-  if (isNew && p.syntax === "powershell" && /[^\x00-\x7f]/.test(out)) out = `\uFEFF${out}`;
-  fs.mkdirSync(path.dirname(p.file), { recursive: true });
+  let markAdded = false;
+  if (needsMark && !out.startsWith("\uFEFF")) { out = `\uFEFF${out}`; markAdded = !isNew; }
+  makeDirs(path.dirname(p.file));
   writeFileAtomic(p.file, out);
-  return { file: p.file, shell: p.shell, syntax: p.syntax, action: applied.action, previous: applied.previous, sepAdded: applied.sepAdded, created: isNew, mkdirs, backup };
+  return { file: p.file, shell: p.shell, syntax: p.syntax, action: applied.action, previous: applied.previous, sepAdded: applied.sepAdded, created: isNew, mkdirs, backup, markAdded };
 }
 
 // Takes our block out of one profile, using the manifest's record of how it went in. Backs the file up first.
@@ -258,6 +264,8 @@ export function removeProfile(rec, { now = Date.now() } = {}) {
   const text = read.text;
   const undone = undoBlock(text, rec);
   if (!undone.removed) return { file: rec.file, removed: false, deleted: false, backup: null, note: "no claude-relocate block in it" };
+  // the byte-order mark that went in with a non-ASCII folder name goes out with it
+  if (rec.markAdded && undone.text.startsWith("\uFEFF")) undone.text = undone.text.slice(1);
   if (rec.created && undone.text.replace(/^\uFEFF/, "").trim() === "") {
     // a file this tool made, with nothing else in it: no backup is worth keeping
     fs.rmSync(rec.file, { force: true });

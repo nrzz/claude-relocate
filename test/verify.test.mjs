@@ -328,3 +328,23 @@ test("with --link the old place is a link, and verify has nothing to say about i
   const r = await verify(atDest(w));
   assert.equal(r.json.checks.some((c) => c.id === "old-place"), false);
 });
+
+test("verify says what a leftover old place is when the manifest knows: files the move could not remove, or a folder it kept because it changed (not a program writing there)", async () => {
+  const w = fresh("vf19", { variable: false });
+  await mv(w, ["--to", w.dest]);
+  put(path.join(w.cfg, "projects", "-p", "a.jsonl"), "{}\n");
+  const file = path.join(w.dest, "relocate-manifest.json");
+  const original = read(file);
+  const cases = [
+    [{ leftBehind: 1 }, /still holds 1 item \(the move could not remove 1 item of it\); Claude Code now uses .*dest\. Delete what is left by hand once you do not need it; undo refuses while it is there\.$/],
+    [{ originalKept: true }, /still holds 1 item \(the move kept it because it changed while it was being copied\); Claude Code now uses .*dest\. Delete what is left by hand once you do not need it; undo refuses while it is there\.$/],
+  ];
+  for (const [fields, expected] of cases) {
+    fs.writeFileSync(file, JSON.stringify({ ...JSON.parse(original), ...fields }, null, 2));
+    const c = check(await verify(atDest(w)), "old-place");
+    assert.equal(c.level, "warn");
+    assert.match(c.message, expected);
+  }
+  fs.writeFileSync(file, original);
+  assert.match(check(await verify(atDest(w)), "old-place").message, /exists again and holds 1 item; Claude Code now uses .*A program that ignores CLAUDE_CONFIG_DIR may be writing there/, "without that knowledge it is the old message");
+});

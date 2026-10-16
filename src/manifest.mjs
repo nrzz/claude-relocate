@@ -8,9 +8,14 @@
 //   stale        { claudeJson: name } the config folder's own old .claude.json, kept under another name, when the
 //                one that was live sat outside the folder
 //   bytes, files what was moved
-//   profiles     [{ file, shell, syntax, action, previous, sepAdded, created, mkdirs, backup }]
+//   profiles     [{ file, shell, syntax, action, previous, sepAdded, created, mkdirs, backup, markAdded }]
+//                (markAdded: a UTF-8 byte-order mark went in with a non-ASCII folder name, and comes out again)
 //   registry     { key, name, value, previous } or null
 //   links        [{ path, target, kind: "dir" | "file", purpose: "origin" | "claude-json" | "xdg" }]
+//   relativeLinks [{ path, was }] links inside the folder with a relative target that reaches out of it, which the move
+//                wrote as absolute links so that they keep working; path is below the config folder, undo writes `was` back
+//   leftBehind   (only when set) how many items a copy could not remove from the old place, such as a file another
+//                program held open; undo says so when that folder is still there
 //   options      { link, noEnv, xdg }
 //   previous     the manifest this folder had before (when the folder was itself the destination of an earlier
 //                move), so that two undos go back two moves

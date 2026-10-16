@@ -74,14 +74,16 @@ test("every source file is .mjs and imports only node built-ins it needs and the
   assert.deepEqual([...used].sort(), ["node:child_process", "node:fs", "node:os", "node:path"]);
 });
 
-test("only the files that look at the machine start processes; nothing can reach the network", () => {
-  const mayStart = new Set(["procs.mjs", "space.mjs", "sys.mjs", "winenv.mjs"]);
+test("only spawn.mjs starts processes, and only the files that look at the machine use it; nothing can reach the network", () => {
   const startsProcesses = [];
+  const usesSpawn = [];
   for (const f of sources()) {
     const text = read(f);
     if (/from "node:child_process"/.test(text)) startsProcesses.push(path.basename(f));
+    if (/from "\.\/spawn\.mjs"/.test(text)) usesSpawn.push(path.basename(f));
   }
-  assert.deepEqual(startsProcesses.sort(), [...mayStart].sort(), "exactly these four");
+  assert.deepEqual(startsProcesses, ["spawn.mjs"], "the one place that imports child_process");
+  assert.deepEqual(usesSpawn.sort(), ["procs.mjs", "space.mjs", "sys.mjs", "winenv.mjs"], "and exactly these four go through it");
   const banned = /\b(fetch|XMLHttpRequest|WebSocket|EventSource)\s*\(|node:(http|https|http2|net|tls|dns|dgram|worker_threads|cluster|vm)\b|\bprocess\.binding\b|\beval\s*\(|new Function\s*\(/;
   for (const f of sources()) assert.doesNotMatch(read(f), banned, f);
 });

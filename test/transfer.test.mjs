@@ -145,3 +145,48 @@ test("moveFile with forceCopy never renames", () => {
   assert.equal(renamed, false);
   assert.ok(!lexists(path.join(base, "e.json")));
 });
+
+test("moveEntry: when the copy is whole but the original cannot be removed completely, the entry has moved: the rest is reported and nothing is taken back", () => {
+  const base = tmpDir();
+  const src = path.join(base, "from", "commands");
+  put(path.join(src, "go.md"), "go\n", T0);
+  put(path.join(src, "keep.md"), "keep\n", T0 + 1000);
+  const dst = path.join(base, "to", "commands");
+  const real = fs.rmSync;
+  const holdsKeep = (p) => { const st = fs.lstatSync(p); return st.isDirectory() && !st.isSymbolicLink() ? fs.readdirSync(p).some((n) => holdsKeep(path.join(p, n))) : path.basename(p) === "keep.md"; };
+  fs.rmSync = (p, o) => { if (String(p).startsWith(src) && lexists(p) && holdsKeep(p)) throw Object.assign(new Error("EBUSY: resource busy or locked, unlink"), { code: "EBUSY" }); return real.call(fs, p, o); };
+  let r;
+  try {
+    const sys = makeSys({ rename: exdev });
+    r = moveEntry(src, dst, sys, { skipped: [], copyFile: sys.copyFile });
+  } finally { fs.rmSync = real; }
+  assert.equal(r.method, "copy");
+  assert.deepEqual(r.left.map((l) => [path.basename(l.path), l.error]), [["keep.md", "EBUSY"]]);
+  assert.deepEqual(Object.keys(tree(dst)).sort(), ["go.md", "keep.md"], "the copy is whole");
+  assert.deepEqual(Object.keys(tree(src)).sort(), ["keep.md"], "go.md is gone from the old place; keep.md stays");
+});
+
+test("moveFile with keepOriginal copies even where a rename would work, so that the original stays; without it the rename is used", () => {
+  const base = tmpDir();
+  put(path.join(base, "a.json"), "{}\n", T0);
+  const kept = moveFile(path.join(base, "a.json"), path.join(base, "n", "b.json"), makeSys(), { keepOriginal: true });
+  assert.equal(kept.method, "copy");
+  assert.equal(fs.readFileSync(path.join(base, "a.json"), "utf8"), "{}\n", "the original is still there");
+  assert.equal(fs.readFileSync(path.join(base, "n", "b.json"), "utf8"), "{}\n");
+  const plain = moveFile(path.join(base, "a.json"), path.join(base, "n", "c.json"), makeSys());
+  assert.equal(plain.method, "rename");
+  assert.ok(!lexists(path.join(base, "a.json")));
+});
+
+test("moveEntry: a source that changed while it was being copied is not removed, the copy is taken away again, and the error says so", () => {
+  const base = tmpDir();
+  const src = sample(path.join(base, "src"));
+  const dst = path.join(base, "dst");
+  const copied = [];
+  // the first file is changed after it was copied
+  const copyFile = (a, b, flags) => { fs.copyFileSync(a, b, flags); copied.push(a); if (copied.length === 2) fs.appendFileSync(copied[0], "more\n"); };
+  assert.throws(() => moveEntry(src, dst, makeSys({ rename: exdev }), { skipped: [], copyFile }), (e) => e.code === "changed-during-copy" && /changed while it was being copied \(1 difference, the first at a\.txt\), so nothing was removed from it\./.test(e.message));
+  assert.ok(!lexists(dst), "the copy is gone");
+  assert.match(fs.readFileSync(path.join(src, "a.txt"), "utf8"), /more/, "and the source has what was added to it");
+  assert.ok(lexists(path.join(src, "dir", "b.txt")));
+});

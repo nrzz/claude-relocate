@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
+import { spawnSync } from "node:child_process";
 import { readManifest } from "../src/manifest.mjs";
 import { blockValue } from "../src/profiles.mjs";
 import { INCOMPLETE } from "../src/move.mjs";
@@ -550,4 +551,274 @@ test("the --xdg split with the state and cache folders on a really different dri
   assert.deepEqual(diffTrees(treeBefore, tree(w.cfg)), []);
   assert.deepEqual(diffTrees(before.base, everything(w).base), []);
   assert.ok(!lexists(path.join(OTHER_DRIVE, "state")) && !lexists(path.join(OTHER_DRIVE, "cache")), "and the folders the move made on the other drive are gone");
+});
+
+test("--xdg when every part is moved by copy still takes a .claude.json that sat next to the folder with it, and undo brings it back (found by review)", async () => {
+  const w = fresh("mv38", { variable: false, platform: LINUX });
+  const before = everything(w);
+  const over = { platform: LINUX, rename: exdev };
+  const r = await moveJson(["--xdg", "--yes"], w, over);
+  assert.equal(r.code, 0, r.all);
+  assert.equal(r.json.mode, "xdg-split");
+  assert.equal(r.json.method, "copy");
+  assert.ok(!lexists(w.claudeJson), "the old ~/.claude.json is gone, not left behind");
+  assert.ok(lexists(path.join(w.xdg.config, ".claude.json")));
+  const u = await runJson(["undo", "--yes"], { ...w, env: { ...w.env, CLAUDE_CONFIG_DIR: w.xdg.config } }, { sys: w.sys(over) });
+  assert.equal(u.code, 0, u.all);
+  assert.deepEqual(diffTrees(before.base, everything(w).base), []);
+});
+
+test("--xdg --link when every part is moved by copy leaves the links for the folder's parts and for ~/.claude.json", { skip: noFileLinks() }, async () => {
+  const w = fresh("mv39", { variable: false, platform: LINUX });
+  const r = await moveJson(["--xdg", "--link", "--yes"], w, { platform: LINUX, rename: exdev });
+  assert.equal(r.code, 0, r.all);
+  assert.ok(fs.lstatSync(w.claudeJson).isSymbolicLink() && fs.lstatSync(w.cfg).isSymbolicLink());
+  assert.equal(read(w.claudeJson), read(w.xdg.config, ".claude.json"));
+});
+
+test("the split that fails half way into a destination folder that already existed leaves that folder empty, as it was", async () => {
+  const w = fresh("mv40", { platform: LINUX });
+  fs.mkdirSync(w.xdg.config, { recursive: true });
+  const before = everything(w);
+  let n = 0;
+  const rename = (a, b) => { if (++n === 14) throw Object.assign(new Error("ENOSPC: no space left on device"), { code: "ENOSPC" }); return fs.renameSync(a, b); };
+  const r = await move(w, ["--xdg", "--yes"], { platform: LINUX, rename });
+  assert.equal(r.code, 1);
+  assert.match(r.err, /The move stopped: ENOSPC/);
+  assert.deepEqual(everything(w), before);
+  assert.deepEqual(fs.readdirSync(w.xdg.config), []);
+});
+
+// A removal that fails the way a file another program holds open does on Windows: the file, and any folder with it
+// inside, cannot be removed; everything else can.
+function holdOpen(name, inside) {
+  const real = fs.rmSync;
+  const holds = (p) => { const st = fs.lstatSync(p); return st.isDirectory() && !st.isSymbolicLink() ? fs.readdirSync(p).some((n) => holds(path.join(p, n))) : path.basename(p) === name; };
+  fs.rmSync = (p, o) => {
+    if (String(p).startsWith(inside) && lexists(p) && holds(p)) throw Object.assign(new Error(`EBUSY: resource busy or locked, unlink '${name}'`), { code: "EBUSY" });
+    return real.call(fs, p, o);
+  };
+  return () => { fs.rmSync = real; };
+}
+
+// A write of the manifest that fails, as a full disk does
+function failManifestWrite() {
+  const real = fs.writeFileSync;
+  fs.writeFileSync = (p, ...rest) => {
+    if (String(p).includes("relocate-manifest.json.tmp-")) throw Object.assign(new Error("ENOSPC: no space left on device, write"), { code: "ENOSPC" });
+    return real.call(fs, p, ...rest);
+  };
+  return () => { fs.writeFileSync = real; };
+}
+
+test("--xdg split: an entry whose copy was checked but whose original cannot be removed completely has moved; the move finishes and names what is left (found by review)", async () => {
+  const w = fresh("mv41", { platform: LINUX });
+  put(path.join(w.cfg, "commands", "keep.md"), "keep me\n");
+  put(path.join(w.cfg, "commands", "go.md"), "go goes from the old place\n");
+  const before = everything(w);
+  const over = { platform: LINUX, rename: exdev };
+  const release = holdOpen("keep.md", path.join(w.cfg, "commands"));
+  let r;
+  try { r = await moveJson(["--xdg", "--yes"], w, over); } finally { release(); }
+  assert.equal(r.code, 1, r.all);
+  assert.deepEqual([r.json.ok, r.json.incomplete], [false, true]);
+  assert.ok(r.json.warnings.some((x) => /Could not remove 1 item \(.*keep\.md: EBUSY\) from .*It is whole in the new place; delete what is left by hand/.test(x)), r.json.warnings.join(" | "));
+  assert.equal(read(w.xdg.config, "commands", "go.md"), "go goes from the old place\n", "the copy has everything");
+  assert.equal(read(w.xdg.config, "commands", "keep.md"), "keep me\n");
+  assert.deepEqual(fs.readdirSync(path.join(w.cfg, "commands")), ["keep.md"], "only the file that was held is left in the old place");
+  assert.equal(manifestOf(w.xdg.config).leftBehind, 1);
+  const atDest = { ...w, env: { ...w.env, CLAUDE_CONFIG_DIR: w.xdg.config } };
+  const refused = await runJson(["undo", "--yes"], atDest, { sys: w.sys(over) });
+  assert.equal(refused.code, 1);
+  assert.match(refused.json.error, /holds what the move could not remove from it, 1 item; delete it\)\. Move it away/);
+  fs.rmSync(w.cfg, { recursive: true, force: true });
+  const u = await runJson(["undo", "--yes"], atDest, { sys: w.sys(over) });
+  assert.equal(u.code, 0, u.all);
+  assert.deepEqual(diffTrees(before.base, everything(w).base), [], "and once the leftover is gone, undo brings the exact tree back");
+});
+
+test("a folder that cannot be renamed is copied, ~/.claude.json goes along as a copy, and when the manifest then cannot be written the file is still where it was (found by review)", async () => {
+  const busyForFolders = (a, b) => { if (fs.statSync(a).isDirectory()) throw Object.assign(new Error("EBUSY: resource busy or locked, rename"), { code: "EBUSY" }); return fs.renameSync(a, b); };
+  const ok = fresh("mv42a", { variable: false });
+  const done = await move(ok, ["--to", ok.dest, "--yes", "--no-env"], { rename: busyForFolders });
+  assert.equal(done.code, 0, done.all);
+  assert.ok(!lexists(ok.claudeJson) && lexists(path.join(ok.dest, ".claude.json")), "without a failure ~/.claude.json ends up in the new folder");
+  const w = fresh("mv42b", { variable: false });
+  const before = everything(w);
+  const release = failManifestWrite();
+  let r;
+  try { r = await move(w, ["--to", w.dest, "--yes", "--no-env"], { rename: busyForFolders }); } finally { release(); }
+  assert.equal(r.code, 1);
+  assert.match(r.err, /The move stopped: ENOSPC/);
+  assert.deepEqual(everything(w), before, "everything is as it was, ~/.claude.json too");
+});
+
+test("--xdg split by rename, then the manifest cannot be written: the folder is put back with its links aimed at the old place again (found by review)", async () => {
+  const w = fresh("mv43", { platform: LINUX });
+  const kind = IS_WIN ? "junction" : "dir";
+  fs.symlinkSync(path.join(w.cfg, "skills"), path.join(w.cfg, "abs-link-to-skills"), kind);
+  fs.symlinkSync(path.join(w.cfg, "skills", "demo"), path.join(w.cfg, "projects", "-work-shop", "abs-link"), kind);
+  const before = everything(w);
+  const release = failManifestWrite();
+  let r;
+  try { r = await move(w, ["--xdg", "--yes"], { platform: LINUX }); } finally { release(); }
+  assert.equal(r.code, 1);
+  assert.match(r.err, /The move stopped: ENOSPC/);
+  assert.deepEqual(diffTrees(before.base, everything(w).base), [], "every link points where it did");
+  assert.ok(fs.existsSync(path.join(w.cfg, "abs-link-to-skills", "demo", "SKILL.md")) && fs.existsSync(path.join(w.cfg, "projects", "-work-shop", "abs-link", "SKILL.md")), "and works");
+});
+
+test("a manifest write that fails once after the profiles were written is tried again; one that keeps failing is a note that names what undo will not take out", async () => {
+  const mk = (name) => { const w = seedConfig(world(name, { shell: "/bin/bash" })); put(path.join(w.home, ".bashrc"), "# mine\n"); return w; };
+  // the renames onto the manifest, counted: from the nth on, `times` of them fail
+  const failFrom = (nth, times) => {
+    const real = fs.renameSync;
+    let n = 0;
+    fs.renameSync = (a, b) => {
+      if (String(b).endsWith(MANIFEST)) { n++; if (n >= nth && n < nth + times) throw Object.assign(new Error("EPERM: operation not permitted, rename"), { code: "EPERM" }); }
+      return real.call(fs, a, b);
+    };
+    return () => { fs.renameSync = real; };
+  };
+  const once = mk("mv44a");
+  let release = failFrom(2, 1);
+  let r;
+  try { r = await moveJson(["--to", once.dest, "--yes"], once, {}); } finally { release(); }
+  assert.equal(r.code, 0, r.all);
+  assert.equal(manifestOf(once.dest).profiles.length, 1, "the second try wrote the profile into the manifest");
+  const w = mk("mv44b");
+  release = failFrom(2, Infinity);
+  try { r = await moveJson(["--to", w.dest, "--yes"], w, {}); } finally { release(); }
+  assert.equal(r.code, 1, r.all);
+  assert.deepEqual([r.json.ok, r.json.incomplete], [false, true]);
+  assert.ok(r.json.warnings.some((x) => x.includes("Could not write") && x.includes("EPERM") && x.includes(path.join(w.home, ".bashrc")) && x.includes("by hand")), r.json.warnings.join(" | "));
+  assert.ok(lexists(path.join(w.dest, "settings.json")) && !lexists(w.cfg), "the data is in the new place");
+  assert.equal(manifestOf(w.dest).profiles.length, 0, "the manifest on disk is the first version");
+  assert.match(read(w.home, ".bashrc"), /# claude-relocate start/, "and the profile has the block");
+});
+
+test("a single folder copied while a file in the old place stays held open: the move finishes, names the file, and undo waits until it is deleted by hand", async () => {
+  const w = fresh("mv45");
+  put(path.join(w.cfg, "projects", "-work-shop", "locked.txt"), "held open\n");
+  const before = everything(w);
+  const over = { rename: exdev, drive: secondDriveAt(w.dest) };
+  const realRename = fs.renameSync;
+  // the lock keeps the old folder from being renamed aside as well, so what cannot be removed stays where it was
+  fs.renameSync = (a, b) => { if (String(b).endsWith(".claude-relocate-old")) throw Object.assign(new Error("EBUSY: resource busy or locked, rename"), { code: "EBUSY" }); return realRename.call(fs, a, b); };
+  const release = holdOpen("locked.txt", w.cfg);
+  let r;
+  try { r = await moveJson(["--to", w.dest, "--yes", "--no-env"], w, over); } finally { release(); fs.renameSync = realRename; }
+  assert.equal(r.code, 1, r.all);
+  assert.ok(r.json.warnings.some((x) => /Could not remove 1 item \(.*locked\.txt: EBUSY\) from .*Everything is in .*delete what is left by hand/.test(x)), r.json.warnings.join(" | "));
+  assert.equal(read(w.dest, "projects", "-work-shop", "locked.txt"), "held open\n", "it is in the new place");
+  assert.deepEqual(Object.keys(tree(w.cfg)).sort(), ["projects", "projects/-work-shop", "projects/-work-shop/locked.txt"], "only the held file, and the folders above it, are left");
+  assert.equal(manifestOf(w.dest).leftBehind, 1);
+  const atDest = { ...w, env: { ...w.env, CLAUDE_CONFIG_DIR: w.dest } };
+  const refused = await runJson(["undo", "--yes"], atDest, { sys: w.sys(over) });
+  assert.equal(refused.code, 1);
+  assert.match(refused.json.error, /holds what the move could not remove from it, 1 item; delete it\)\. Move it away/);
+  fs.rmSync(w.cfg, { recursive: true, force: true });
+  const u = await runJson(["undo", "--yes"], atDest, { sys: w.sys(over) });
+  assert.equal(u.code, 0, u.all);
+  assert.deepEqual(diffTrees(before.base, everything(w).base), []);
+});
+
+test("a destination directly below the top of a drive works, and so does the undo that makes the old folder there again (found by review: Node cannot make the drive root itself)", { skip: !(IS_WIN && OTHER_DRIVE) && "needs Windows and a second writable drive" }, async () => {
+  const root = path.parse(OTHER_DRIVE).root;
+  const dest = path.join(root, `cr-direct-${process.pid}`);
+  const cfg = path.join(root, `cr-origin-${process.pid}`);
+  try {
+    // 1. to a folder directly below the top of the other drive
+    const a = fresh("mv47a");
+    const aBefore = everything(a);
+    const m = await moveJson(["--to", dest, "--yes", "--no-env"], a);
+    assert.equal(m.code, 0, m.all);
+    assert.equal(m.json.method, "copy");
+    assert.ok(lexists(path.join(dest, "settings.json")));
+    const u = await runJson(["undo", "--yes"], { ...a, env: { ...a.env, CLAUDE_CONFIG_DIR: dest } }, { sys: a.sys() });
+    assert.equal(u.code, 0, u.all);
+    assert.ok(!lexists(dest), "the folder it made is gone");
+    assert.deepEqual(diffTrees(aBefore.base, everything(a).base), []);
+    // 2. a config folder that sits directly below the top of a drive, moved away and brought back
+    const w0 = world("mv47b", { shell: "" });
+    const w = { ...w0, cfg, claudeJson: path.join(cfg, ".claude.json"), env: { ...w0.env, CLAUDE_CONFIG_DIR: cfg } };
+    seedConfig(w);
+    const before = tree(cfg);
+    const m2 = await moveJson(["--to", w.dest, "--yes", "--no-env"], w);
+    assert.equal(m2.code, 0, m2.all);
+    assert.ok(!lexists(cfg));
+    const u2 = await runJson(["undo", "--yes"], { ...w, env: { ...w.env, CLAUDE_CONFIG_DIR: w.dest } }, { sys: w.sys() });
+    assert.equal(u2.code, 0, u2.all);
+    assert.deepEqual(diffTrees(before, tree(cfg)), []);
+  } finally {
+    fs.rmSync(dest, { recursive: true, force: true });
+    fs.rmSync(cfg, { recursive: true, force: true });
+  }
+});
+
+test("a named pipe in the folder is left out of a copy and said so, and is not a reason to refuse the move (POSIX)", { skip: IS_WIN && "Windows has no named pipes in folders" }, async (t) => {
+  const w = fresh("mv48");
+  if (spawnSync("mkfifo", [path.join(w.cfg, "pipe")]).status !== 0) { t.skip("mkfifo is not available"); return; }
+  const r = await moveJson(["--to", w.dest, "--yes", "--no-env"], w, { rename: exdev, drive: secondDriveAt(w.dest) });
+  assert.equal(r.code, 0, r.all);
+  assert.ok(r.json.warnings.some((x) => /1 special file \(sockets or pipes\) could not be copied and was left out/.test(x)), r.json.warnings.join(" | "));
+  assert.ok(!lexists(path.join(w.dest, "pipe")) && !lexists(w.cfg));
+});
+
+test("move to a new folder below a link to a real folder, and undo, work through the link (found by review: it was refused as 'is a file')", async () => {
+  const w = fresh("mv49");
+  const real = path.join(w.base, "bigdisk", "config");
+  fs.mkdirSync(real, { recursive: true });
+  const link = path.join(w.base, "configlink");
+  fs.symlinkSync(real, link, IS_WIN ? "junction" : "dir");
+  const dest = path.join(link, "claude");
+  const before = everything(w);
+  const r = await moveJson(["--to", dest, "--yes", "--no-env"], w);
+  assert.equal(r.code, 0, r.all);
+  assert.ok(lexists(path.join(real, "claude", "settings.json")), "the data is in the real folder behind the link");
+  const u = await runJson(["undo", "--yes"], { ...w, env: { ...w.env, CLAUDE_CONFIG_DIR: dest } }, { sys: w.sys() });
+  assert.equal(u.code, 0, u.all);
+  assert.deepEqual(diffTrees(before.base, everything(w).base), [], "the link and the folder behind it are as they were");
+});
+
+test("a single folder whose original changes while it is copied: the move finishes, keeps the original, says what changed, and undo says why the old place is in the way (found by review)", async () => {
+  const w = fresh("mv50", { variable: false });
+  const copied = [];
+  const copyFile = (a, b, flags) => { fs.copyFileSync(a, b, flags); copied.push(a); if (copied.length === 4) fs.appendFileSync(copied[0], "written by a program that started meanwhile\n"); };
+  const over = { rename: exdev, drive: secondDriveAt(w.dest), copyFile };
+  const r = await moveJson(["--to", w.dest, "--yes", "--no-env"], w, over);
+  assert.equal(r.code, 1, r.all);
+  assert.deepEqual([r.json.ok, r.json.incomplete], [false, true]);
+  assert.ok(r.json.warnings.some((x) => /changed while it was being copied, so the original was not removed\. The copy in .* is .* as it was when the move began/.test(x)), r.json.warnings.join(" | "));
+  assert.ok(lexists(path.join(w.cfg, "settings.json")), "the original is still there");
+  assert.ok(lexists(w.claudeJson), "and so is the ~/.claude.json that went with it");
+  assert.ok(lexists(path.join(w.dest, "settings.json")) && lexists(path.join(w.dest, ".claude.json")), "the copy is complete");
+  assert.equal(manifestOf(w.dest).originalKept, true);
+  const refused = await runJson(["undo", "--yes"], { ...w, env: { ...w.env, CLAUDE_CONFIG_DIR: w.dest } }, { sys: w.sys(over) });
+  assert.equal(refused.code, 1);
+  assert.match(refused.json.error, /the move kept it because it changed while it was being copied; compare it with the new folder and delete it\)\. Move it away/);
+});
+
+test("the text of a move that kept its original, or could not empty the old place, does not say the original was removed, and says what to do before undo (found by review)", async () => {
+  const copied = [];
+  const copyFile = (a, b, flags) => { fs.copyFileSync(a, b, flags); copied.push(a); if (copied.length === 4) fs.appendFileSync(copied[0], "written while copying\n"); };
+  const kept = fresh("mv51a", { variable: false });
+  const k = await move(kept, ["--to", kept.dest, "--yes", "--no-env"], { rename: exdev, drive: secondDriveAt(kept.dest), copyFile });
+  assert.equal(k.code, 1, k.all);
+  assert.match(k.out, /^ {2}copied and checked; the original was kept, because it changed while it was being copied$/m);
+  assert.doesNotMatch(k.out, /then the original was removed/);
+  assert.match(k.out, /^To put everything back: delete what is left of the old place, as the notes say, then run claude-relocate undo$/m);
+  const stuck = fresh("mv51b");
+  put(path.join(stuck.cfg, "projects", "-work-shop", "locked.txt"), "held open\n");
+  const release = holdOpen("locked.txt", stuck.cfg);
+  let s;
+  try { s = await move(stuck, ["--to", stuck.dest, "--yes", "--no-env"], { rename: exdev, drive: secondDriveAt(stuck.dest) }); } finally { release(); }
+  assert.equal(s.code, 1, s.all);
+  assert.match(s.out, /^ {2}copied and checked; the original was removed except for what the notes below name$/m);
+  assert.match(s.out, /^note {2}Could not remove 1 item /m);
+  assert.match(s.out, /^To put everything back: delete what is left of the old place, as the notes say, then run claude-relocate undo$/m);
+  const ok = fresh("mv51c");
+  const o = await move(ok, ["--to", ok.dest, "--yes", "--no-env"], { rename: exdev, drive: secondDriveAt(ok.dest) });
+  assert.match(o.out, /^ {2}copied and checked, then the original was removed$/m);
+  assert.match(o.out, /^To put everything back: claude-relocate undo$/m);
 });

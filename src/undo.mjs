@@ -13,8 +13,9 @@ import { manifestFile, readManifest, writeManifest } from "./manifest.mjs";
 import { describeProcesses } from "./plan.mjs";
 import { readProfiles, removeProfile } from "./profiles.mjs";
 import { COPY_INSTEAD, VerifyError, copyChildren, moveEntry, moveFile } from "./transfer.mjs";
-import { MiB, UserError, exists, isEmptyDir, isInside, realLoose, samePath, size, statOf } from "./util.mjs";
-import { compareSnapshots, makeLink, pruneEmpty, removeEmptyParents, removeTree, retargetLinks, snapshot } from "./walk.mjs";
+import { INCOMPLETE } from "./move.mjs";
+import { MiB, UserError, describeLeft, exists, isEmptyDir, isInside, makeDirs, realLoose, samePath, size, statOf } from "./util.mjs";
+import { compareSnapshots, makeLink, pruneEmpty, removeEmptyParents, removeTree, removeWhatYouCan, restoreRelativeLinks, retargetLinks, snapshot } from "./walk.mjs";
 import { readUserEnv, removeUserEnv, writeUserEnv } from "./winenv.mjs";
 
 const problem = (code, message) => ({ code, message });
@@ -89,19 +90,28 @@ export function runUndo({ env, cwd, sys, opts, log = () => {} }) {
     if (stA.isSymbolicLink()) {
       if (!samePath(realLoose(A), realLoose(B))) problems.push(problem("origin-in-use", `${A} is a link to somewhere other than ${B}. Remove it or move it away, then run this again.`));
     } else if (!stA.isDirectory()) problems.push(problem("origin-in-use", `${A} is a file. Move it away, then run this again.`));
-    else if (!isEmptyDir(A)) problems.push(problem("origin-in-use", `${A} exists and is not empty (something created it after the move). Move it away, then run this again.`));
+    else if (!isEmptyDir(A)) {
+      const why = exists(path.join(A, INCOMPLETE)) ? `it holds an unfinished copy from an earlier undo, marked by a ${INCOMPLETE} file; delete the folder`
+        : M.leftBehind ? `it holds what the move could not remove from it, ${M.leftBehind} item${M.leftBehind === 1 ? "" : "s"}; delete it`
+          : M.originalKept ? "the move kept it because it changed while it was being copied; compare it with the new folder and delete it"
+            : "something created it after the move";
+      problems.push(problem("origin-in-use", `${A} exists and is not empty (${why}). Move it away, then run this again.`));
+    }
   }
   const liveJson = path.join(B, CLAUDE_JSON);
   if (!M.origin.claudeJsonInside && exists(liveJson)) {
     const st = statOf(AJ);
     if (st && !(st.isSymbolicLink() && samePath(realLoose(AJ), realLoose(liveJson)))) problems.push(problem("claude-json-in-use", `${AJ} exists (something created it after the move), and ${liveJson} has to go back there. Move one of them away, then run this again.`));
   }
-  const sameDrive = !!sys.drive(A) && sys.drive(A) === sys.drive(B);
+  // The old place may be a link to the new folder (move --link), and a link has the drive of what it leads to: the
+  // folder lands where the old place is, so that is the folder to ask about.
+  const landing = stA && stA.isSymbolicLink() ? path.dirname(A) : A;
+  const sameDrive = !!sys.drive(landing) && sys.drive(landing) === sys.drive(B);
   let need = 0;
   if (!sameDrive && stB) {
     const snap = exists(B) ? snapshot(B) : { bytes: 0, files: 0 };
     need = snap.bytes + snap.files * 1024 + 16 * MiB;
-    const free = sys.free(A);
+    const free = sys.free(landing);
     if (free !== null && free < need) problems.push(problem("not-enough-space", `Not enough free space at ${A}: about ${size(need)} needed, ${size(free)} free.`));
   }
   const steps = describeUndoSteps(M, { sameDrive });
@@ -164,7 +174,7 @@ export function runUndo({ env, cwd, sys, opts, log = () => {} }) {
 
     // 4. the config folder goes home (with its manifest, which is taken out of the folder afterwards, so that a
     //    failure on the way leaves the manifest where `undo` can read it again)
-    fs.mkdirSync(path.dirname(A), { recursive: true });
+    makeDirs(path.dirname(A));
     const emptyInTheWay = exists(A);
     if (emptyInTheWay) fs.rmdirSync(A);
     method = "copy";
@@ -185,17 +195,25 @@ export function runUndo({ env, cwd, sys, opts, log = () => {} }) {
       log(`  copying ${B} back to ${A}`);
       const before = snapshot(B);
       fs.mkdirSync(A);
+      fs.writeFileSync(path.join(A, INCOMPLETE), "claude-relocate is copying into this folder. If this file is still here, the copy was interrupted: delete the folder.\n");
       try {
         copyChildren(B, A, ctx);
-        const same = compareSnapshots(before, snapshot(A), { rewrite: { from: B, to: A } });
+        const same = compareSnapshots(before, snapshot(A), { rewrite: { from: B, to: A }, ignore: (rel) => rel === INCOMPLETE });
         if (!same.ok) throw new VerifyError(`The copy in ${A} does not match ${B} (${same.count} difference${same.count === 1 ? "" : "s"}, first: ${same.mismatches[0].path}: ${same.mismatches[0].problem}). Nothing in ${B} was changed.`, same.mismatches);
+        fs.rmSync(path.join(A, INCOMPLETE), { force: true });
+        const timesOfB = fs.lstatSync(B);
+        fs.utimesSync(A, timesOfB.atimeMs / 1000, timesOfB.mtimeMs / 1000);
       } catch (e) {
         try { removeTree(A); } catch { /* best effort */ }
         throw e;
       }
-      // the copy in A is complete and checked: a folder that cannot be removed completely is a note, not a failure
-      try { removeTree(B); } catch (e) { failed(`${A} is complete, but ${B} could not be removed completely (${e.code || e.message}). Delete what is left of it by hand.`); }
+      // the copy in A is complete and checked: what cannot be removed from B is a note, not a failure
+      const stuck = removeWhatYouCan(B);
+      if (stuck.length) failed(`${A} is complete, but ${describeLeft(stuck)} could not be removed from ${B}. Delete what is left of it by hand.`);
     }
+    // the relative links that the move had to make absolute get their old text back
+    const relinked = restoreRelativeLinks(A, M.relativeLinks);
+    if (relinked.failed) warnings.push(`${relinked.failed} relative link${relinked.failed === 1 ? "" : "s"} could not be written as ${relinked.failed === 1 ? "it was" : "they were"} and ${relinked.failed === 1 ? "stays" : "stay"} absolute; ${relinked.failed === 1 ? "it points" : "they point"} at the same files.`);
     if (method === "rename" && partsCopied) method = "mixed"; // the folder was renamed, parts came back from another drive by copy
     fs.rmSync(manifestFile(A), { force: true });
     if (M.destination.existedBefore) { try { fs.mkdirSync(B); } catch { /* it exists again */ } }
@@ -205,15 +223,18 @@ export function runUndo({ env, cwd, sys, opts, log = () => {} }) {
     if (e instanceof UserError) throw e;
     throw new UserError(`The undo stopped: ${e && e.message ? e.message : e}. What has not been put back yet is still in ${B}, with its relocate-manifest.json. Fix the cause and run undo again.`, "undo-failed");
   }
-  // the folders the move made on the way, once they are empty again
-  if (M.mode === "xdg-split") {
-    if (!M.destination.stateExisted && M.destination.state) pruneEmpty(M.destination.state);
-    if (!M.destination.cacheExisted && M.destination.cache) pruneEmpty(M.destination.cache);
-  }
-  for (const key of ["state", "cache", "config"]) {
-    const top = M.destination.created && M.destination.created[key];
-    if (typeof top === "string" && path.isAbsolute(top)) pruneEmpty(top);
-  }
+  // the folders the move made on the way, once they are empty again (a folder that cannot be listed stays: it holds
+  // no data, and the environment below has to be put back whatever happens here)
+  try {
+    if (M.mode === "xdg-split") {
+      if (!M.destination.stateExisted && M.destination.state) pruneEmpty(M.destination.state);
+      if (!M.destination.cacheExisted && M.destination.cache) pruneEmpty(M.destination.cache);
+    }
+    for (const key of ["state", "cache", "config"]) {
+      const top = M.destination.created && M.destination.created[key];
+      if (typeof top === "string" && path.isAbsolute(top)) pruneEmpty(top);
+    }
+  } catch { /* empty folders are not data */ }
 
   // 5. the environment
   const profileResults = [];
