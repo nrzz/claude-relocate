@@ -22,7 +22,8 @@ export const DAY = 86400000;
 
 const made = [];
 export function tmpDir(prefix = "cr-") {
-  const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), prefix)));
+  // the native real path: on Windows it also turns a short name (RUNNER~1) into the long one, which is what the tool sees
+  const dir = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), prefix)));
   made.push(dir);
   return dir;
 }
@@ -50,7 +51,7 @@ Object.assign(process.env, {
 delete process.env.FORCE_COLOR;
 for (const k of Object.keys(process.env)) if (/^(CLAUDE_CODE_|ANTHROPIC_)/.test(k)) delete process.env[k];
 
-const underTmp = (p) => path.resolve(p).toLowerCase().startsWith(fs.realpathSync(os.tmpdir()).toLowerCase());
+const underTmp = (p) => path.resolve(p).toLowerCase().startsWith(fs.realpathSync.native(os.tmpdir()).toLowerCase());
 
 // ---------------------------------------------------------------------------------------------
 // Worlds
@@ -273,17 +274,21 @@ export function fakeClaudeOnPath(version = "9.9.9 (Claude Code)") {
   return dir;
 }
 
-let nodeAsClaude;
-// A running process whose image is called claude (a copy of the node program, kept alive for a minute), so that the
-// process check can be tried for real. Returns { pid, stop() }.
+let programCalledClaude;
+let sleeps = false;
+// A running process whose image is called claude, kept alive for a minute, so that the process check can be tried
+// for real. On Linux a copy of the sleep program (a copy of node there shows up under another name in ps with newer
+// Node versions); elsewhere a copy of the node program. Returns { pid, stop() }.
 export function startFakeClaude() {
-  if (!nodeAsClaude) {
+  if (!programCalledClaude) {
     const dir = tmpDir("cr-proc-");
-    nodeAsClaude = path.join(dir, IS_WIN ? "claude.exe" : "claude");
-    fs.copyFileSync(process.execPath, nodeAsClaude);
-    fs.chmodSync(nodeAsClaude, 0o755);
+    programCalledClaude = path.join(dir, IS_WIN ? "claude.exe" : "claude");
+    const sleep = process.platform === "linux" ? ["/bin/sleep", "/usr/bin/sleep"].find((p) => fs.existsSync(p)) : null;
+    sleeps = !!sleep;
+    fs.copyFileSync(sleep || process.execPath, programCalledClaude);
+    fs.chmodSync(programCalledClaude, 0o755);
   }
-  const child = spawn(nodeAsClaude, ["-e", "setTimeout(() => {}, 60000)"], { stdio: "ignore", windowsHide: true });
+  const child = sleeps ? spawn(programCalledClaude, ["60"], { stdio: "ignore" }) : spawn(programCalledClaude, ["-e", "setTimeout(() => {}, 60000)"], { stdio: "ignore", windowsHide: true });
   return { pid: child.pid, stop: () => { try { child.kill(); } catch { /* gone */ } } };
 }
 
@@ -296,8 +301,8 @@ export function otherDriveDir() {
     if (!fs.existsSync(base) || dev(base) === here || !dev(base)) continue;
     try {
       const dir = fs.mkdtempSync(path.join(base, ".cr-other-"));
-      made.push(fs.realpathSync(dir));
-      return fs.realpathSync(dir);
+      made.push(fs.realpathSync.native(dir));
+      return fs.realpathSync.native(dir);
     } catch { /* not writable */ }
   }
   return null;

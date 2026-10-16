@@ -116,7 +116,8 @@ export const fold = (p) => (FOLD ? p.toLowerCase() : p);
 // The folder given as an absolute path, a leading ~ meaning the home folder.
 export function resolveFolder(p, cwd, home) {
   let s = String(p);
-  if (home && (s === "~" || s.startsWith("~/") || s.startsWith("~\\"))) s = path.join(home, s.slice(1));
+  // ~/x everywhere; ~\x only where a backslash separates names (on Linux and macOS it is a letter of a name)
+  if (home && (s === "~" || s.startsWith("~/") || (path.sep === "\\" && s.startsWith("~\\")))) s = path.join(home, s.slice(1));
   return path.resolve(cwd || process.cwd(), s);
 }
 

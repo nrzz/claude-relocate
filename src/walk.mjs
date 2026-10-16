@@ -223,7 +223,8 @@ export function removeTree(p) {
   try {
     fs.rmSync(p, opts);
   } catch (e) {
-    if (IS_WIN || !["EACCES", "EPERM"].includes(e.code)) throw e;
+    // a folder that cannot be written into: some systems say EACCES or EPERM, others only ENOTEMPTY for the folder above it
+    if (IS_WIN || !["EACCES", "EPERM", "ENOTEMPTY"].includes(e.code)) throw e;
     openUp(p);
     fs.rmSync(p, opts);
   }

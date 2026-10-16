@@ -294,7 +294,7 @@ test("which .claude.json the binary reads: the one inside CLAUDE_CONFIG_DIR when
   }
 });
 
-test("what the binary does with XDG_CONFIG_HOME, XDG_STATE_HOME and XDG_CACHE_HOME when CLAUDE_CONFIG_DIR is not set (asserted on Windows, reported elsewhere)", { skip: skip(), timeout: TIMEOUT }, async () => {
+test("XDG_CONFIG_HOME, XDG_STATE_HOME and XDG_CACHE_HOME are ignored when CLAUDE_CONFIG_DIR is not set: why the tool sets the variable itself", { skip: skip(), timeout: TIMEOUT }, async () => {
   const sb = sandbox("xdgvars", { variable: false });
   fs.rmSync(sb.cfg, { recursive: true, force: true }); // no ~/.claude: the case in which Claude Code might look elsewhere
   const xdg = { config: path.join(sb.base, "xdg-config"), state: path.join(sb.base, "xdg-state"), cache: path.join(sb.base, "xdg-cache") };
@@ -306,7 +306,7 @@ test("what the binary does with XDG_CONFIG_HOME, XDG_STATE_HOME and XDG_CACHE_HO
     const read = readLog(sb).some((l) => l.env.RELOCATE_SETTING === "from-xdg-settings");
     const result = { platform: process.platform, readXdgConfigSettings: read, wroteHomeDotClaude: lexists(path.join(sb.home, ".claude", "projects")), wroteXdgState: lexists(xdg.state), wroteXdgCache: lexists(xdg.cache) };
     console.log(`note: with CLAUDE_CONFIG_DIR unset and the XDG variables set, ${claudeInfo().version} did: ${JSON.stringify(result)}`);
-    if (process.platform === "win32") assert.deepEqual(result, { platform: "win32", readXdgConfigSettings: false, wroteHomeDotClaude: true, wroteXdgState: false, wroteXdgCache: false }, "on Windows the XDG variables are ignored");
+    assert.deepEqual(result, { platform: process.platform, readXdgConfigSettings: false, wroteHomeDotClaude: true, wroteXdgState: false, wroteXdgCache: false }, "the binary uses ~/.claude and leaves the XDG folders alone");
   } finally { await api.close(); }
 });
 

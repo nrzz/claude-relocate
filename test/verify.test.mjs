@@ -257,16 +257,20 @@ test("verify text ends with whether every check passed, and says terminals opene
 });
 
 test("the terminal check: ok when this terminal already names the destination, information when it does not", async () => {
-  const w = fresh("vf14");
-  await mv(w, ["--to", w.dest]);
-  const old = await verify(w);
+  // a profile block (and on Windows the user environment) lets verify find the manifest from a terminal that still names the old place
+  const w = fresh("vf14", { shell: "/bin/bash" });
+  put(path.join(w.home, ".bashrc"), "alias a=b\n");
+  const over = { platform: LINUX };
+  await mv(w, ["--to", w.dest], over);
+  const old = await verify(w, over);
+  assert.equal(old.json.found.via, `the block in ${path.join(w.home, ".bashrc")}`);
   assert.equal(check(old, "terminal").level, "info");
   assert.match(check(old, "terminal").message, /^This terminal has CLAUDE_CONFIG_DIR=.*cfg: it started before the move, or the variable is set some other way\.$/);
   const unset = { ...w, env: { ...w.env } };
   delete unset.env.CLAUDE_CONFIG_DIR;
-  const none = await verify(unset);
+  const none = await verify(unset, over);
   assert.match(check(none, "terminal").message, /^This terminal does not have CLAUDE_CONFIG_DIR set: /);
-  assert.equal(check(await verify(atDest(w)), "terminal").level, "ok");
+  assert.equal(check(await verify(atDest(w), over), "terminal").level, "ok");
 });
 
 test("verify after --xdg off Windows checks every link of the split", async () => {

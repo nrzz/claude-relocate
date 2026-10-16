@@ -1,7 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { isClaudeName, listClaudeProcesses, parsePsArgs, parsePsComm, parseTasklist } from "../src/procs.mjs";
-import { startFakeClaude } from "./helpers.mjs";
+import { spawnSync } from "node:child_process";
+import { IS_WIN, startFakeClaude } from "./helpers.mjs";
 
 // What tasklist /FO CSV /NH printed on the machine the tool was written on (Windows 11), cut down.
 const TASKLIST = [
@@ -83,6 +84,7 @@ test("the real tasklist or ps finds a running program called claude", () => {
       found = r.processes.some((x) => x.pid === p.pid);
       if (!found) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 200);
     }
-    assert.ok(found, "the process called claude was listed");
+    const seen = IS_WIN ? "" : spawnSync("ps", ["-p", String(p.pid), "-o", "pid=,comm=,args="], { encoding: "utf8" }).stdout;
+    assert.ok(found, `the process called claude was listed (ps says: ${JSON.stringify(seen)})`);
   } finally { p.stop(); }
 });

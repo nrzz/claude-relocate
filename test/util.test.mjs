@@ -170,7 +170,7 @@ test("resolveFolder: ~ is the home folder, a relative path is relative to the wo
   const cwd = path.resolve(path.sep, "work");
   assert.equal(resolveFolder("~", cwd, home), home);
   assert.equal(resolveFolder("~/claude", cwd, home), path.join(home, "claude"));
-  assert.equal(resolveFolder("~\\claude", cwd, home), path.join(home, "claude"));
+  assert.equal(resolveFolder("~\\claude", cwd, home), IS_WIN ? path.join(home, "claude") : path.join(cwd, "~\\claude"), "~\\ is the home folder on Windows only");
   assert.equal(resolveFolder("~other", cwd, home), path.join(cwd, "~other"), "~other is not the home folder");
   assert.equal(resolveFolder("rel/dir", cwd, home), path.join(cwd, "rel", "dir"));
   assert.equal(resolveFolder(path.join(cwd, "abs"), cwd, home), path.join(cwd, "abs"));
