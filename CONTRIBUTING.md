@@ -38,7 +38,7 @@ npm test
 
 ## House rules
 
-1. **No dependencies.** Node built-ins only, Node 18 or newer, ES modules (`.mjs`). A pull request that adds a package to `dependencies` will not be merged. Only `src/procs.mjs`, `src/space.mjs`, `src/sys.mjs` and `src/winenv.mjs` may start a process, and nothing may open a network connection; a test fails otherwise.
+1. **No dependencies.** Node built-ins only, Node 18 or newer, ES modules (`.mjs`). A pull request that adds a package to `dependencies` will not be merged. Only `src/spawn.mjs` may import `child_process`, and only `src/procs.mjs`, `src/space.mjs`, `src/sys.mjs` and `src/winenv.mjs` may use it; nothing may open a network connection; a test fails otherwise. (`spawn.mjs` starts the Windows programs by full path.)
 2. **Every change comes with a test**, and `npm test` passes. CI runs the suite on Windows, macOS and Linux with Node 20, 22 and 24, and on Linux with Node 18, and the real-binary checks on Linux and macOS; a change that only works on one of them is not done. Paths with spaces, junctions and `EXDEV` are part of the job.
 3. **Never touch real user data in tests.** `test/helpers.mjs` points `HOME`, `USERPROFILE`, `CLAUDE_CONFIG_DIR`, `APPDATA`, the XDG variables and the registry key of the test process at throwaway places the moment it loads; build a world with `world()` and run the tool in it. A test never reads or writes the real `~/.claude`, a real shell profile or `HKCU\Environment`.
 4. **A move can be undone.** A change to what `move` writes needs the same change in `undo` and a test that compares the tree before the move with the tree after the undo. Anything that changes what the manifest means changes its `schema`.
