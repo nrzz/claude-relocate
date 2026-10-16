@@ -1,0 +1,89 @@
+name: Bug report
+description: Something in claude-relocate does not work as described
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. Please remove secrets, tokens and private paths from anything you paste. `claude-relocate` never reads the text of a session, but the paths in its output may say more than you want to share.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What you did, what you expected, and what happened instead. If a move stopped or left something behind, say what is where now.
+    validations:
+      required: true
+  - type: input
+    id: command
+    attributes:
+      label: The command
+      description: The exact command line, with the options.
+      placeholder: claude-relocate move --to D:\Claude --link --yes
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Run ...
+        2. Then ...
+        3. See ...
+    validations:
+      required: true
+  - type: dropdown
+    id: layout
+    attributes:
+      label: Where was the config folder?
+      options:
+        - The default, ~/.claude (CLAUDE_CONFIG_DIR not set)
+        - A folder named by CLAUDE_CONFIG_DIR
+        - Already a link or junction to another place
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: claude
+    attributes:
+      label: Claude Code version
+      description: The output of `claude --version`, or the desktop app's version.
+      placeholder: 2.1.295
+    validations:
+      required: true
+  - type: dropdown
+    id: where
+    attributes:
+      label: Where do you run Claude Code?
+      options:
+        - Terminal
+        - Desktop app
+        - VS Code
+        - JetBrains
+        - Web
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: env
+    attributes:
+      label: Operating system, drives and Node version
+      description: For a move to another drive, say what kind of drive it is (internal, external, network share).
+      placeholder: "Windows 11, C: to D: (both internal), Node 22.11 (node --version)"
+    validations:
+      required: true
+  - type: dropdown
+    id: install
+    attributes:
+      label: How did you install it?
+      options:
+        - npx from GitHub
+        - The toolkit setup page (npx -y github:nrzz/claude-code-toolkit)
+        - git clone
+        - Other
+  - type: textarea
+    id: output
+    attributes:
+      label: Output or logs
+      description: The exact output of the command, and of `claude-relocate verify` and `claude-relocate status`, with secrets removed.
+      render: text

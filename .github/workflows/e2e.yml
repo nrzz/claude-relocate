@@ -1,0 +1,35 @@
+name: e2e
+
+# The checks that run the real Claude Code on a config folder the tool moved: the binary starts from the new place,
+# writes and resumes a session there, reads settings.json and .claude.json from it, loads a plugin installed before the
+# move, and works through the links --link and --xdg leave. They cost nothing: Claude Code talks to a fake server on
+# 127.0.0.1. Optional by design: if the binary cannot be installed, the checks skip. Weekly, so a Claude Code release
+# that changes where it keeps things shows up here.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: "41 6 * * 1"
+  workflow_dispatch:
+
+jobs:
+  claude:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - name: Install the Claude Code CLI (the checks skip if this fails)
+        run: npm install -g @anthropic-ai/claude-code
+        continue-on-error: true
+      - name: Move, resume, undo against the real binary
+        run: node --test test/e2e-claude.test.mjs
+        env:
+          E2E_CLAUDE: claude
