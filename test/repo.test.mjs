@@ -189,7 +189,7 @@ test("the costs table has one row per command, every one 0 tokens", () => {
   assert.match(section, /Nothing runs a model/);
 });
 
-test("Part of the toolkit: the thirteen lines of the other tools, the settings doctor, the setup page and the star line, word for word", () => {
+test("Part of the toolkit: the lines of the other tools, the setup page and the star line, word for word", () => {
   const readme = read("README.md");
   const tail = readme.slice(readme.indexOf("\n## Part of the Claude Code toolkit\n"), readme.indexOf("\n## License\n"));
   const lines = tail.split("\n").filter((l) => l.startsWith("- ["));
@@ -208,6 +208,8 @@ test("Part of the toolkit: the thirteen lines of the other tools, the settings d
     "- [claude-session-tidy](https://github.com/nrzz/claude-session-tidy): list, delete, keep and restore your sessions before the 30-day sweep",
     "- [claude-hook-bench](https://github.com/nrzz/claude-hook-bench): run every hook with the JSON Claude Code sends, and see what each one does",
     "- [claude-settings-doctor](https://github.com/nrzz/claude-settings-doctor): a commented settings.jsonc that builds settings.json, the merged settings with their source, a lint against the schema",
+    "- [claude-automode-doctor](https://github.com/nrzz/claude-automode-doctor): what auto mode and its classifier decided, from your transcripts, plus a lint of the autoMode settings",
+    "- [claude-mcp-check](https://github.com/nrzz/claude-mcp-check): every MCP server Claude Code would load, from which file, whether it starts, and what its tools cost",
   ]);
   assert.ok(tail.includes("Small, dependency-free tools that make Claude Code cheaper, safer and easier to share, all in the [Claude Code toolkit](https://github.com/nrzz/claude-code-toolkit):"));
   assert.ok(tail.includes("Set up any of them, or all of them, from one page: `npx -y github:nrzz/claude-code-toolkit` opens it with the recommended tools switched on."));
