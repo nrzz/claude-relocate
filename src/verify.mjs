@@ -123,6 +123,18 @@ export function runVerify({ env, cwd, sys }) {
     }
   }
 
+  // the old place, made again: a program that ignores CLAUDE_CONFIG_DIR writes there (undo refuses while it is not empty)
+  if (M && !samePath(realLoose(M.origin.configDir), realLoose(dest))) {
+    const folder = statOf(M.origin.configDir);
+    const items = folder && folder.isDirectory() && !folder.isSymbolicLink() ? fs.readdirSync(M.origin.configDir).length : 0;
+    const json = !M.origin.claudeJsonInside ? statOf(M.origin.claudeJson) : null;
+    const jsonAgain = !!json && !json.isSymbolicLink();
+    const bits = [];
+    if (items) bits.push(`${M.origin.configDir} exists again and holds ${plural(items, "item")}`);
+    if (jsonAgain) bits.push(`${M.origin.claudeJson} was made again${items ? " next to it" : ""}`);
+    if (bits.length) add("old-place", "warn", `${bits.join(", and ")}; Claude Code now uses ${dest}. A program that ignores CLAUDE_CONFIG_DIR may be writing there; undo refuses while ${bits.length > 1 ? "they are" : "it is"} there; move --link makes such programs use the new folder.`, { path: M.origin.configDir });
+  }
+
   // the real claude
   const v = claudeVersion(env, dest, sys);
   if (!v.found) add("claude", "skip", "claude is not on PATH, so `claude --version` was not run.");

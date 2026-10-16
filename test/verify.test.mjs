@@ -303,3 +303,28 @@ test("verify changes nothing", async () => {
   assert.ok(lexists(path.join(w.dest, "relocate-manifest.json")));
   assert.equal(read(w.home, ".bashrc").includes("claude-relocate start"), true);
 });
+
+test("verify warns when something has made the old place again: a program that ignores CLAUDE_CONFIG_DIR is writing there", async () => {
+  const w = fresh("vf17", { variable: false });
+  await mv(w, ["--to", w.dest]);
+  const quiet = await verify(atDest(w));
+  assert.equal(quiet.json.checks.some((c) => c.id === "old-place"), false, "nothing at the old place: nothing to say");
+  fs.mkdirSync(w.cfg);
+  assert.equal((await verify(atDest(w))).json.checks.some((c) => c.id === "old-place"), false, "an empty folder is not a sign of anything");
+  put(path.join(w.cfg, "projects", "-p", "a.jsonl"), "{}\n");
+  put(path.join(w.cfg, "settings.json"), "{}\n");
+  put(w.claudeJson, '{"fresh":true}');
+  const r = await verify(atDest(w));
+  assert.equal(r.code, 0, "a warning does not fail verify");
+  const c = check(r, "old-place");
+  assert.equal(c.level, "warn");
+  assert.match(c.message, /exists again and holds 2 items, and .*\.claude\.json was made again next to it; Claude Code now uses .*dest\. A program that ignores CLAUDE_CONFIG_DIR may be writing there/);
+  assert.match(c.message, /undo refuses while they are there; move --link makes such programs use the new folder\.$/);
+});
+
+test("with --link the old place is a link, and verify has nothing to say about it", async () => {
+  const w = fresh("vf18", { variable: false });
+  await mv(w, ["--to", w.dest, "--link"]);
+  const r = await verify(atDest(w));
+  assert.equal(r.json.checks.some((c) => c.id === "old-place"), false);
+});

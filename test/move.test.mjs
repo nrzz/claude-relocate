@@ -526,3 +526,28 @@ test("move to a really different drive: planned as a copy, copied, checked, the 
   const after = everything(w);
   assert.deepEqual(diffTrees(before.base, after.base, { ignore: [] }), []);
 });
+
+test("the --xdg split with the state and cache folders on a really different drive: the config folder is renamed, the parts are copied behind links, undo brings back the exact tree (when this machine has a second drive)", { skip: !OTHER_DRIVE && "this machine has no second writable drive" }, async () => {
+  const w = fresh("mv37", { platform: LINUX });
+  const env = { ...w.env, XDG_STATE_HOME: path.join(OTHER_DRIVE, "state"), XDG_CACHE_HOME: path.join(OTHER_DRIVE, "cache") };
+  const x = { ...w, env };
+  const before = everything(w);
+  const treeBefore = tree(w.cfg);
+  const over = { platform: LINUX };
+  const plan = await runJson(["plan", "--xdg"], x, { sys: w.sys(over) });
+  assert.deepEqual(plan.json.problems, []);
+  assert.equal(plan.json.destination.method, "mixed");
+  assert.deepEqual(plan.json.destination.groups.map((g) => `${g.area}:${g.method}`), ["config:rename", "state:copy", "cache:copy"]);
+  const m = await runJson(["move", "--xdg", "--yes"], x, { sys: w.sys(over) });
+  assert.equal(m.code, 0, m.all);
+  assert.equal(m.json.method, "mixed");
+  assert.ok(lexists(path.join(OTHER_DRIVE, "state", "claude", "projects", "-work-shop")) && lexists(path.join(OTHER_DRIVE, "cache", "claude", "plugins", "cache", "m")));
+  assert.ok(fs.lstatSync(path.join(w.xdg.config, "projects")).isSymbolicLink());
+  const atDest = { ...x, env: { ...env, CLAUDE_CONFIG_DIR: w.xdg.config } };
+  const u = await runJson(["undo", "--yes"], atDest, { sys: w.sys(over) });
+  assert.equal(u.code, 0, u.all);
+  assert.equal(u.json.method, "mixed", "the folder came back by rename and the parts by copy");
+  assert.deepEqual(diffTrees(treeBefore, tree(w.cfg)), []);
+  assert.deepEqual(diffTrees(before.base, everything(w).base), []);
+  assert.ok(!lexists(path.join(OTHER_DRIVE, "state")) && !lexists(path.join(OTHER_DRIVE, "cache")), "and the folders the move made on the other drive are gone");
+});

@@ -4,6 +4,10 @@ on:
   push:
   pull_request:
 
+# The jobs only read the repository.
+permissions:
+  contents: read
+
 jobs:
   test:
     strategy:
@@ -32,3 +36,23 @@ jobs:
         continue-on-error: true
       - run: node --version && git --version
       - run: npm test
+
+  # The package as npm would install it: the tarball holds every file the command needs, and the command it links starts.
+  package:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - name: Pack, install the tarball globally, run the command
+        shell: bash
+        run: |
+          npm pack --silent
+          npm install -g ./claude-relocate-*.tgz
+          claude-relocate --version
+          claude-relocate --help > /dev/null

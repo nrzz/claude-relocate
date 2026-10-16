@@ -131,6 +131,7 @@ export function runUndo({ env, cwd, sys, opts, log = () => {} }) {
   }
 
   let method;
+  let partsCopied = false;
   try {
     // 2. the state and cache parts come home
     for (const p of [...M.parts].reverse()) {
@@ -141,7 +142,7 @@ export function runUndo({ env, cwd, sys, opts, log = () => {} }) {
       if (exists(p.to)) {
         log(`  moving ${p.path} back from the ${p.area} folder`);
         try {
-          moveEntry(p.to, linkPath, sys, { ...ctx, rewrite: { from: p.to, to: linkPath }, absoluteInside: false });
+          if (moveEntry(p.to, linkPath, sys, { ...ctx, rewrite: { from: p.to, to: linkPath }, absoluteInside: false }).method === "copy") partsCopied = true;
           retargetLinks(linkPath, p.to, { from: p.to, to: linkPath });
           // a folder the move made inside the state or cache folder on the way (plugins/ for plugins/cache)
           const base = p.area === "state" ? M.destination.state : M.destination.cache;
@@ -195,6 +196,7 @@ export function runUndo({ env, cwd, sys, opts, log = () => {} }) {
       // the copy in A is complete and checked: a folder that cannot be removed completely is a note, not a failure
       try { removeTree(B); } catch (e) { failed(`${A} is complete, but ${B} could not be removed completely (${e.code || e.message}). Delete what is left of it by hand.`); }
     }
+    if (method === "rename" && partsCopied) method = "mixed"; // the folder was renamed, parts came back from another drive by copy
     fs.rmSync(manifestFile(A), { force: true });
     if (M.destination.existedBefore) { try { fs.mkdirSync(B); } catch { /* it exists again */ } }
     if (M.previous) writeManifest(A, M.previous);

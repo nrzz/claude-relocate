@@ -132,6 +132,7 @@ test("the CI workflows: the suite on three systems and four Node versions, the r
   assert.match(ci, /uses: actions\/checkout@\S+/);
   assert.match(ci, /uses: actions\/setup-node@\S+/);
   assert.match(ci, /run: npm test/);
+  assert.match(ci, /npm pack/, "the packed tarball is installed and run on the three systems");
   const e2e = read(".github/workflows/e2e.yml");
   for (const part of ["name: e2e", "os: [ubuntu-latest, macos-latest]", "npm install -g @anthropic-ai/claude-code", "continue-on-error: true", "E2E_CLAUDE: claude", "test/e2e-claude.test.mjs", "schedule:", "workflow_dispatch"]) assert.ok(e2e.includes(part), part);
   assert.match(e2e, /uses: actions\/checkout@\S+/);

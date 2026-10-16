@@ -48,6 +48,7 @@ test("renderUndone: where the folder is back, how, and what to do in this termin
     "Open a new terminal. If this terminal has CLAUDE_CONFIG_DIR set, it still points at the old place: unset it here too.",
   ].join("\n"));
   assert.match(renderUndone({ ...r, method: "copy" }, { c: plain }), /^ {2}copied and checked, then the copy in the new place was removed$/m);
+  assert.match(renderUndone({ ...r, method: "mixed" }, { c: plain }), /^ {2}renamed where the drive is the same, copied and checked where it is not$/m);
   assert.match(renderUndone({ ...r, warnings: ["a note"], incomplete: true }, { c: plain }), /^note {2}a note\n\n✗ The folder is back, but not everything around it could be undone \(see the notes above\)\.$/m);
 });
 

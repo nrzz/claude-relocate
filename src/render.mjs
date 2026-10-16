@@ -112,7 +112,7 @@ export function renderMoved(r, { c }) {
 export function renderUndone(r, { c }) {
   const lines = [];
   lines.push(`${c.green("Undone.")} ${r.destination} is back at ${r.origin}`);
-  lines.push(`  ${r.method === "rename" ? "renamed, not copied: both are on the same drive" : "copied and checked, then the copy in the new place was removed"}`);
+  lines.push(`  ${r.method === "rename" ? "renamed, not copied: both are on the same drive" : r.method === "mixed" ? "renamed where the drive is the same, copied and checked where it is not" : "copied and checked, then the copy in the new place was removed"}`);
   for (const w of r.warnings) lines.push(`${c.yellow("note")}  ${w}`);
   lines.push("");
   lines.push(r.incomplete ? `${c.red("✗")} The folder is back, but not everything around it could be undone (see the notes above).` : "Open a new terminal. If this terminal has CLAUDE_CONFIG_DIR set, it still points at the old place: unset it here too.");

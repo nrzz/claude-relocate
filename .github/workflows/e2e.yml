@@ -13,6 +13,10 @@ on:
     - cron: "41 6 * * 1"
   workflow_dispatch:
 
+# The jobs only read the repository.
+permissions:
+  contents: read
+
 jobs:
   claude:
     strategy:
