@@ -206,11 +206,15 @@ function planDestination(model, { env, cwd, sys, opts, cfg, home, platform }) {
   model.destination = target;
 
   // --- what else `move` writes ---
-  const profiles = opts.noEnv ? [] : planProfiles(env, { home, platform });
+  const planned = opts.noEnv ? [] : planProfiles(env, { home, platform });
+  const profiles = planned.filter((p) => p.action !== "skip");
+  const notWritten = planned.filter((p) => p.action === "skip").map((p) => ({ file: p.file, shell: p.shell, reason: p.skip }));
+  for (const n of notWritten) model.warnings.push(`${n.file} ${n.reason}, so claude-relocate leaves it alone. Set CLAUDE_CONFIG_DIR=${target.config} in it yourself.`);
   if (profiles.length && /[\r\n\0]/.test(target.config)) problems.push(problem("bad-folder-name", `The destination ${JSON.stringify(target.config)} has a line break or a null character in its name; a shell profile cannot hold that. Choose another name, or leave profiles alone with --no-env.`));
   model.env = {
     skipped: !!opts.noEnv,
     profiles,
+    notWritten,
     registry: platform === "win32" && !opts.noEnv ? { key: keyOf(env), name: "CLAUDE_CONFIG_DIR", value: target.config } : null,
     variable: target.config,
   };

@@ -10,7 +10,7 @@
 //   # claude-relocate end
 import fs from "node:fs";
 import path from "node:path";
-import { exists, fileStamp, statOf, uniquePath, writeFileAtomic, fail } from "./util.mjs";
+import { UserError, exists, fileStamp, statOf, uniquePath, writeFileAtomic, fail } from "./util.mjs";
 import { shellInUse } from "./env.mjs";
 
 export const START = "# claude-relocate start";
@@ -176,7 +176,18 @@ function primaryFor(shell, candidates, platform) {
   return undefined;
 }
 
-// What `move` will do to profiles: [{ shell, syntax, file, exists, action: "append" | "replace" | "create" }].
+// The text of a profile, if it is UTF-8 (a byte-order mark of UTF-8 stays in the text). A file in UTF-16 or in an
+// ANSI code page would be damaged by reading it as UTF-8 and writing it back, so it is not touched.
+// { ok: true, text } or { ok: false, reason }. A file that cannot be read at all throws.
+export function readProfileText(file) {
+  const raw = fs.readFileSync(file);
+  const text = raw.toString("utf8");
+  if (!Buffer.from(text, "utf8").equals(raw)) return { ok: false, reason: "is not UTF-8 text (it may be UTF-16, or use an ANSI code page)" };
+  return { ok: true, text };
+}
+
+// What `move` will do to profiles: [{ shell, syntax, file, exists, action: "append" | "replace" | "create" | "skip", skip? }].
+// A file that is not UTF-8 text is "skip", with the reason.
 // Every candidate that exists gets the block. A profile is created only for the shell in use ($SHELL) when none of
 // that shell's files exists, and not at all on Windows, where the user environment reaches every shell.
 export function planProfiles(env, { home, platform = process.platform }) {
@@ -186,7 +197,11 @@ export function planProfiles(env, { home, platform = process.platform }) {
     const st = statOf(c.file);
     if (!st) continue;
     let action = "append";
-    try { if (findBlock(fs.readFileSync(c.file, "utf8"))) action = "replace"; } catch { /* unreadable: the write will say so */ }
+    try {
+      const r = readProfileText(c.file);
+      if (!r.ok) { plan.push({ ...c, exists: true, action: "skip", skip: r.reason }); continue; }
+      if (findBlock(r.text)) action = "replace";
+    } catch { /* unreadable: the write will say so */ }
     plan.push({ ...c, exists: true, action });
   }
   if (platform !== "win32") {
@@ -215,7 +230,9 @@ export function writeProfile(p, value, { home, now = Date.now() } = {}) {
   let text = "";
   let backup = null;
   if (!isNew) {
-    text = fs.readFileSync(p.file, "utf8");
+    const r = readProfileText(p.file);
+    if (!r.ok) throw new UserError(`${p.file} ${r.reason}, so it is left alone.`, "profile-encoding");
+    text = r.text;
     backup = uniquePath(`${p.file}.bak-claude-relocate-${fileStamp(now)}`);
     fs.copyFileSync(p.file, backup);
   }
@@ -236,7 +253,9 @@ export function writeProfile(p, value, { home, now = Date.now() } = {}) {
 export function removeProfile(rec, { now = Date.now() } = {}) {
   const st = statOf(rec.file);
   if (!st) return { file: rec.file, removed: false, deleted: false, backup: null, note: "the file is gone" };
-  const text = fs.readFileSync(rec.file, "utf8");
+  const read = readProfileText(rec.file);
+  if (!read.ok) return { file: rec.file, removed: false, deleted: false, backup: null, note: `${read.reason}, so it is left alone`, problem: true };
+  const text = read.text;
   const undone = undoBlock(text, rec);
   if (!undone.removed) return { file: rec.file, removed: false, deleted: false, backup: null, note: "no claude-relocate block in it" };
   if (rec.created && undone.text.replace(/^\uFEFF/, "").trim() === "") {

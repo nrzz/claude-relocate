@@ -309,7 +309,7 @@ function execute(model, opts, sys, env, log, steps) {
         manifest.profiles.push(rec);
         log(`  ${rec.created ? "created" : "updated"} ${rec.file}${rec.backup ? ` (backup: ${rec.backup})` : ""}`);
       } catch (e) {
-        failed(`Could not write ${p.file}: ${e.code || e.message}. Put CLAUDE_CONFIG_DIR=${B} in it yourself.`);
+        failed(`Could not write ${p.file}: ${e instanceof UserError ? e.message : e.code || e.message}. Put CLAUDE_CONFIG_DIR=${B} in it yourself.`);
       }
     }
     if (model.env.registry) {

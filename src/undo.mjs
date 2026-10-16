@@ -218,7 +218,8 @@ export function runUndo({ env, cwd, sys, opts, log = () => {} }) {
     try {
       const r = removeProfile(rec, { now: sys.now() });
       profileResults.push(r);
-      if (r.removed) log(`  took the block out of ${r.file}${r.deleted ? " (the file was ours and is deleted)" : ""}${r.backup ? ` (backup: ${r.backup})` : ""}`);
+      if (r.problem) failed(`Could not take the block out of ${r.file}: it ${r.note}. Delete the lines between "# claude-relocate start" and "# claude-relocate end" by hand.`);
+      else if (r.removed) log(`  took the block out of ${r.file}${r.deleted ? " (the file was ours and is deleted)" : ""}${r.backup ? ` (backup: ${r.backup})` : ""}`);
       else log(`  ${r.file}: ${r.note}`);
     } catch (e) {
       failed(`Could not take the block out of ${rec.file}: ${e.code || e.message}. Delete the lines between "# claude-relocate start" and "# claude-relocate end" by hand.`);
