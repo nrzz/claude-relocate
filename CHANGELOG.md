@@ -2,6 +2,10 @@
 
 All notable changes to claude-relocate are written here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+- `plan` and `status`: report the free space of the drive the config folder is on, under `.claude.json`; `--json` carries `origin.freeBytes` in `plan` and `configDir.freeBytes` in `status`.
+
 ## [1.0.0] - 2026-10-16
 
 - First release. `plan` shows what is in Claude Code's config folder and how big each kind is (settings, sessions, plugins, plugin cache, state and caches, `.claude.json`), where it would go, the room on the destination drive and every reason a move would be refused. `move --to <folder>` renames the folder on the same drive, or copies it to another drive, checks the copy against the original and only then removes the original; file times and links are kept. `move --xdg` uses `$XDG_CONFIG_HOME/claude`, and on Linux and macOS puts the sessions and other state in `$XDG_STATE_HOME/claude` and the caches in `$XDG_CACHE_HOME/claude`, each behind a symbolic link. `CLAUDE_CONFIG_DIR` is written into the bash, zsh, fish and PowerShell profiles that exist (after a backup) and into the Windows user environment; `--link` leaves a junction or symbolic link at the old place; a running claude process, a destination that is not empty or inside the folder, and no room are refused before anything changes. `verify` checks the profiles, the user environment, the folder, `.claude.json`, the links, the list of sessions and `claude --version`. `undo` reads `relocate-manifest.json` and puts everything back; `status` shows where things are. `--json` on every command, `--dry-run` on `move` and `undo`, nothing changes without `--yes`, exit codes 0, 1 and 2.

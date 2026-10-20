@@ -83,6 +83,7 @@ $ claude-relocate plan --to D:\Claude
 claude-relocate 1.0.0  what would move
 config folder   C:\Users\me\.claude  (the default: CLAUDE_CONFIG_DIR is not set)
 .claude.json    C:\Users\me\.claude.json  (next to the config folder, because CLAUDE_CONFIG_DIR is not set)
+free space      12.3 GB on the drive of the config folder
 
   KIND                   SIZE    FILES  GOES TO               WHAT
   settings              328 B        9  config                CLAUDE.md, agents/, commands/, keybindings.json, ... (3 more)
@@ -253,6 +254,7 @@ $ claude-relocate status
 claude-relocate 1.0.0  status
 config folder   C:\Users\me\.claude  (the default: CLAUDE_CONFIG_DIR is not set in this terminal; a link to D:\Claude)
 .claude.json    C:\Users\me\.claude.json  (a link; next to the config folder)
+free space      12.3 GB on the drive of the config folder
 moved           C:\Users\me\.claude to D:\Claude on 2026-10-16 (one folder, by copy)
                 manifest: C:\Users\me\.claude\relocate-manifest.json
 link            C:\Users\me\.claude -> D:\Claude  (resolves)
@@ -271,8 +273,8 @@ It always exits 0. It reads the same places as `verify` and changes nothing.
 
 `--json` prints one object on stdout whose first fields are `schema` (1), `tool`, `version` and `command`, then `ok`. Errors, including usage errors, are `{"ok": false, "error": "..."}`, with a `code` when a move or an undo stopped on an error of its own (`move-failed`, `undo-failed`, `changed-during-copy`, `verify-failed`). A refusal is a whole document with `refused`, `problems` (each with a `code` and a `message`) and `error`, the first message. The three read-only commands are meant to be called by other programs:
 
-- `plan`: `platform`, `home`, `origin` (`configDir`, `source`, `exists`, `isLink`, `linkTarget`, `claudeJson`, `claudeJsonInside`, `claudeJsonExists`, `claudeJsonIsLink`, `relocated`), `kinds` (each with `kind`, `label`, `bytes`, `files`, `links`, `entries`, `destination`), `entries` (every top-level item with its `kind`, `type`, `bytes`, `files`), `total`, `destination` (`requested`, `mode`: `single` or `xdg-split`, `config`, `state`, `cache`, `parts`, `method`, `groups` with `area`, `path`, `bytes`, `files`, `drive` and `method` each, `claudeJson`, `existedBefore`, `stateExisted`, `cacheExisted`), `space` (a list, each with `path`, `paths`, `copy`, `needBytes`, `freeBytes`, `ok`), `env` (`profiles`, `notWritten`, `registry`, `variable`, `skipped`), `processes` (`ok`, `list`, `error`), `references`, `warnings`, `problems` (each with a `code` and a `message`) and `links`. `ok` is false when there is a problem.
-- `status`: `platform`, `thisTerminal`, `configDir`, `claudeJson`, `moved` (`from`, `to`, `mode`, `method`, `date`, `manifest`, or null), `links`, `profiles`, `windowsEnvironment`, `shell` and `newTerminals`.
+- `plan`: `platform`, `home`, `origin` (`configDir`, `source`, `exists`, `isLink`, `linkTarget`, `claudeJson`, `claudeJsonInside`, `claudeJsonExists`, `claudeJsonIsLink`, `freeBytes`, `relocated`), `kinds` (each with `kind`, `label`, `bytes`, `files`, `links`, `entries`, `destination`), `entries` (every top-level item with its `kind`, `type`, `bytes`, `files`), `total`, `destination` (`requested`, `mode`: `single` or `xdg-split`, `config`, `state`, `cache`, `parts`, `method`, `groups` with `area`, `path`, `bytes`, `files`, `drive` and `method` each, `claudeJson`, `existedBefore`, `stateExisted`, `cacheExisted`), `space` (a list, each with `path`, `paths`, `copy`, `needBytes`, `freeBytes`, `ok`), `env` (`profiles`, `notWritten`, `registry`, `variable`, `skipped`), `processes` (`ok`, `list`, `error`), `references`, `warnings`, `problems` (each with a `code` and a `message`) and `links`. `ok` is false when there is a problem.
+- `status`: `platform`, `thisTerminal`, `configDir` (`path`, `exists`, `isLink`, `resolvesTo`, `freeBytes`), `claudeJson`, `moved` (`from`, `to`, `mode`, `method`, `date`, `manifest`, or null), `links`, `profiles`, `windowsEnvironment`, `shell` and `newTerminals`.
 - `verify`: `checks` (each with `id`, `level` and `message`), `sessions` (`path`, `sessions`, and `projects` with `name`, `sessions`, `newest`), `manifest`, `destination` and `found`.
 
 `move` and `undo` print `steps` (what would be done, or was), `method`, `warnings` and `incomplete`; a refusal adds `refused`, `problems` and `error`, a missing `--yes` adds `needsYes`, and `--dry-run` adds `dryRun`. `move` also prints `plan`, `files`, `bytes` and `manifest`; a finished one has `mode`, `verified`, `manifestData` and `stale` as well, and a finished `undo` has `manifest`, `found`, `profiles`, `registry`, `origin` and `destination`.
