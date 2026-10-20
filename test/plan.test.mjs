@@ -58,7 +58,7 @@ test("plan --json is one document with the fields the setup page reads", async (
   const j = r.json;
   assert.deepEqual(Object.keys(j).sort(), ["command", "destination", "entries", "env", "home", "kinds", "links", "ok", "origin", "platform", "problems", "processes", "references", "schema", "space", "tool", "total", "version", "warnings"]);
   assert.deepEqual([j.schema, j.tool, j.version, j.command, j.ok, j.platform], [1, "claude-relocate", VERSION, "plan", true, process.platform]);
-  assert.deepEqual(Object.keys(j.origin).sort(), ["claudeJson", "claudeJsonExists", "claudeJsonInside", "claudeJsonIsLink", "configDir", "exists", "isLink", "linkTarget", "relocated", "source"]);
+  assert.deepEqual(Object.keys(j.origin).sort(), ["claudeJson", "claudeJsonExists", "claudeJsonInside", "claudeJsonIsLink", "configDir", "exists", "freeBytes", "isLink", "linkTarget", "relocated", "source"]);
   assert.deepEqual(Object.keys(j.kinds[0]).sort(), ["bytes", "destination", "entries", "files", "kind", "label", "links"]);
   assert.deepEqual(Object.keys(j.destination).sort(), ["cache", "cacheExisted", "claudeJson", "config", "existedBefore", "groups", "method", "mode", "parts", "requested", "state", "stateExisted"]);
   assert.equal(j.destination.config, w.dest);
@@ -66,6 +66,22 @@ test("plan --json is one document with the fields the setup page reads", async (
   assert.deepEqual(Object.keys(j.space[0]).sort(), ["copy", "freeBytes", "needBytes", "ok", "path", "paths"]);
   assert.deepEqual(Object.keys(j.env).sort(), ["notWritten", "profiles", "registry", "skipped", "variable"]);
   assert.equal(r.err, "");
+});
+
+test("plan: free space of origin drive in text and json, and leaves it out when null", async () => {
+  const w = seedConfig(world("plan-free"));
+  const freeVal = 12.3 * 1073741824;
+  const withFree = await run(["plan"], w, { sys: w.sys({ free: () => freeVal }) });
+  assert.equal(withFree.code, 0);
+  assert.match(withFree.out, /^free space {6}12\.3 GB on the drive of the config folder$/m);
+  const jFree = await runJson(["plan"], w, { sys: w.sys({ free: () => freeVal }) });
+  assert.equal(jFree.json.origin.freeBytes, freeVal);
+
+  const withoutFree = await run(["plan"], w, { sys: w.sys({ free: () => null }) });
+  assert.equal(withoutFree.code, 0);
+  assert.ok(!withoutFree.out.includes("free space"));
+  const jNoFree = await runJson(["plan"], w, { sys: w.sys({ free: () => null }) });
+  assert.equal(jNoFree.json.origin.freeBytes, null);
 });
 
 test("plan exits 1 and says why when the config folder is missing, with or without the variable", async () => {

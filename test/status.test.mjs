@@ -35,6 +35,22 @@ test("status text for a folder that was never moved", async () => {
   assert.match(r.out, /^This terminal: CLAUDE_CONFIG_DIR is not set\.$/m);
 });
 
+test("status: free space of origin drive in text and json, and leaves it out when null", async () => {
+  const w = fresh("st-free");
+  const freeVal = 12.3 * 1073741824;
+  const withFree = await run(["status"], w, { sys: w.sys({ free: () => freeVal }) });
+  assert.equal(withFree.code, 0);
+  assert.match(withFree.out, /^free space {6}12\.3 GB on the drive of the config folder$/m);
+  const jFree = await status(w, { free: () => freeVal });
+  assert.equal(jFree.json.configDir.freeBytes, freeVal);
+
+  const withoutFree = await run(["status"], w, { sys: w.sys({ free: () => null }) });
+  assert.equal(withoutFree.code, 0);
+  assert.ok(!withoutFree.out.includes("free space"));
+  const jNoFree = await status(w, { free: () => null });
+  assert.equal(jNoFree.json.configDir.freeBytes, null);
+});
+
 test("status after a move says from where to where, when and how, and where the manifest is", async () => {
   const w = fresh("st3");
   await mv(w, ["--to", w.dest]);

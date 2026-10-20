@@ -69,11 +69,13 @@ export function buildPlan({ env, cwd, sys, opts = {} }) {
   const cfg = configInUse(env, { cwd, platform });
   const home = cfg.home;
   const st = statOf(cfg.dir);
+  const free = sys.free(cfg.dir);
   const model = {
     schema: 1, tool: "claude-relocate", version: VERSION, platform, home,
     origin: {
       configDir: cfg.dir, source: cfg.source, exists: !!st && st.isDirectory() && !st.isSymbolicLink(), isLink: !!st && st.isSymbolicLink(), linkTarget: null,
-      claudeJson: cfg.claudeJson, claudeJsonInside: cfg.claudeJsonInside, claudeJsonExists: false, claudeJsonIsLink: false, relocated: false,
+      claudeJson: cfg.claudeJson, claudeJsonInside: cfg.claudeJsonInside, claudeJsonExists: false, claudeJsonIsLink: false,
+      freeBytes: typeof free === "number" ? free : null, relocated: false,
     },
     kinds: [], entries: [], total: { bytes: 0, files: 0, links: 0 },
     destination: null, space: [], env: null, processes: { ok: true, list: [], error: null },
