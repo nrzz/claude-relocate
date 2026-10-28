@@ -39,7 +39,7 @@ test("plan prints the kinds as a table with sizes, a total and what to do next",
   const w = seedConfig(world("plan2"));
   const r = await run(["plan"], w);
   assert.equal(r.code, 0, r.all);
-  assert.match(r.out, /^claude-relocate 1\.0\.0 {2}what would move$/m);
+  assert.match(r.out, /^claude-relocate 1\.1\.0 {2}what would move$/m);
   assert.match(r.out, new RegExp(`^config folder {3}${w.cfg.replace(/[\\^$.*+?()[\]{}|]/g, "\\$&")} {2}\\(from CLAUDE_CONFIG_DIR\\)$`, "m"));
   assert.match(r.out, /^ {2}KIND +SIZE +FILES +WHAT$/m);
   for (const label of ["settings", "sessions", "plugins", "plugin cache", "state and caches", ".claude.json", "total"]) assert.match(r.out, new RegExp(`^ {2}${label.replace(".", "\\.")} `, "m"), label);

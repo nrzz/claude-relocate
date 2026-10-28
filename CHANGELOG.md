@@ -4,7 +4,11 @@ All notable changes to claude-relocate are written here. The format follows [Kee
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-10-28
+
 - `plan` and `status`: report the free space of the drive the config folder is on, under `.claude.json`; `--json` carries `origin.freeBytes` in `plan` and `configDir.freeBytes` in `status`.
+- Contributed by [@yoreva-01](https://github.com/yoreva-01) in [#2](https://github.com/nrzz/claude-relocate/pull/2), for the good first issue [#1](https://github.com/nrzz/claude-relocate/issues/1).
+- The README's test count is the runner's again: 372 automated tests (375 with the 3 helper files), 356 passing without `E2E_CLAUDE` and 364 with it (the two new tests do not use the binary). It had said 370 before the pull request's two tests.
 
 ## [1.0.0] - 2026-10-16
 
@@ -13,4 +17,5 @@ All notable changes to claude-relocate are written here. The format follows [Kee
 - Zero dependencies: Node 18 or newer and `node:` built-ins only. The tool runs no model and opens no network connection, so it costs no tokens.
 - Checked against Claude Code 2.1.295 and 2.1.299 on Windows and 2.1.301 on Linux and macOS (CI): a moved folder works from its new place (a session written before the move resumes with its history, `settings.json` and `.claude.json` are read there, a plugin installed before the move loads, the links work), and which `.claude.json` the binary reads. `test/e2e-claude.test.mjs` repeats the checks; CI runs them on Linux and macOS with the newest npm release. See the README's "What was verified, and how".
 
+[1.1.0]: https://github.com/nrzz/claude-relocate/releases/tag/v1.1.0
 [1.0.0]: https://github.com/nrzz/claude-relocate/releases/tag/v1.0.0

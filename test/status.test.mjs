@@ -28,7 +28,7 @@ test("status text for a folder that was never moved", async () => {
   const w = fresh("st2", { variable: false });
   const r = await run(["status"], w, { sys: w.sys() });
   assert.equal(r.code, 0, r.all);
-  assert.match(r.out, /^claude-relocate 1\.0\.0 {2}status$/m);
+  assert.match(r.out, /^claude-relocate 1\.1\.0 {2}status$/m);
   assert.match(r.out, /^config folder {3}.*\.claude {2}\(the default: CLAUDE_CONFIG_DIR is not set in this terminal\)$/m);
   assert.match(r.out, /^\.claude\.json {4}.*\.claude\.json {2}\(\d+ B; next to the config folder\)$/m);
   assert.match(r.out, /^moved {11}no relocate-manifest\.json found: not moved by claude-relocate, or it is gone$/m);

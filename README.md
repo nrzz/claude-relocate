@@ -80,7 +80,7 @@ The examples below were run in a throwaway world on Windows 11 with Node 24.19.0
 
 ```text
 $ claude-relocate plan --to D:\Claude
-claude-relocate 1.0.0  what would move
+claude-relocate 1.1.0  what would move
 config folder   C:\Users\me\.claude  (the default: CLAUDE_CONFIG_DIR is not set)
 .claude.json    C:\Users\me\.claude.json  (next to the config folder, because CLAUDE_CONFIG_DIR is not set)
 free space      12.3 GB on the drive of the config folder
@@ -112,7 +112,7 @@ Without `--to` or `--xdg` it prints the first block only and says to pass one. T
 
 ```text
 $ claude-relocate move --to D:\Full --yes
-claude-relocate 1.0.0  move
+claude-relocate 1.1.0  move
 ✗ Not moved.
   - The destination D:\Full exists and is not empty (1 item). Choose a new or empty folder.
 Nothing was changed.
@@ -122,7 +122,7 @@ It refuses the same way for a destination inside the config folder, the config f
 
 ```text
 $ claude-relocate move --to D:\Claude --yes
-claude-relocate 1.0.0  move
+claude-relocate 1.1.0  move
 ✗ Not moved.
   - Claude Code or the Claude desktop app is running: 18 processes (claude.exe; pid 1948, 4524, 6836, 8908, 9064, and 13 more). Close it, then run this again. (--ignore-running skips this check.)
 Nothing was changed.
@@ -145,7 +145,7 @@ Without `--yes` it prints the steps and changes nothing (exit 1, on stderr, so a
 
 ```text
 $ claude-relocate move --to D:\Claude --link --dry-run
-claude-relocate 1.0.0  move
+claude-relocate 1.1.0  move
 With --dry-run, this is what would happen:
   1. Move C:\Users\me\.claude to D:\Claude (copied and checked, then the original is deleted: another drive).
   2. Move C:\Users\me\.claude.json into the new folder, as D:\Claude\.claude.json.
@@ -165,7 +165,7 @@ With `--yes`:
 
 ```text
 $ claude-relocate move --to D:\Claude --link --yes
-claude-relocate 1.0.0  move
+claude-relocate 1.1.0  move
   copying C:\Users\me\.claude to D:\Claude
   copying agents
   copying CLAUDE.md
@@ -205,7 +205,7 @@ On the same drive it is a rename and says `renamed, not copied: both are on the 
 
 ```text
 $ claude-relocate verify
-claude-relocate 1.0.0  verify
+claude-relocate 1.1.0  verify
   info  Moved by claude-relocate on 2026-10-16: C:\Users\me\.claude is now D:\Claude (one folder). Manifest: D:\Claude\relocate-manifest.json.
   ok    D:\Claude exists.
   ok    D:\Claude\.claude.json exists (127 KB).
@@ -231,7 +231,7 @@ Open a new terminal so that it starts with CLAUDE_CONFIG_DIR, then start claude 
 
 ```text
 $ claude-relocate undo --yes
-claude-relocate 1.0.0  undo
+claude-relocate 1.1.0  undo
   removed the link C:\Users\me\.claude
   removed the link C:\Users\me\.claude.json
   moving D:\Claude\.claude.json back to C:\Users\me\.claude.json
@@ -251,7 +251,7 @@ Whatever was written to the new place since the move (new sessions, changed sett
 
 ```text
 $ claude-relocate status
-claude-relocate 1.0.0  status
+claude-relocate 1.1.0  status
 config folder   C:\Users\me\.claude  (the default: CLAUDE_CONFIG_DIR is not set in this terminal; a link to D:\Claude)
 .claude.json    C:\Users\me\.claude.json  (a link; next to the config folder)
 free space      12.3 GB on the drive of the config folder
@@ -323,7 +323,7 @@ Nothing leaves your machine: no network request, no telemetry, no account. It re
 
 Checked on 2026-10-16 on Windows 11 (10.0.26300) with Node 24.19.0 and Claude Code 2.1.295 and 2.1.299 (the builds bundled with the desktop app). CI runs the unit tests on Linux, macOS and Windows with Node 20, 22 and 24 and on Linux with Node 18, a `package` job on the same three systems (npm packs the tarball, installs it globally, and the command runs), and the real-binary checks on Linux and macOS against the current npm release of Claude Code; the badge at the top shows the last run.
 
-- **370 automated tests** (`npm test`, Node's own runner, no dependencies, 44 to 52 seconds in the runs made for this README, most of it the PowerShell profile check; on Node 20 and newer `node --test` also reports each of the 3 helper files under `test/` as a passing test, so the runner's 373 is 370 without them). With `E2E_CLAUDE` unset, 354 pass and 16 are skipped: the 8 real-binary checks, and 8 that this machine cannot run (zsh, fish and PowerShell 7 are not installed; permission bits, named pipes and a read-only parent folder are POSIX only). With `E2E_CLAUDE` pointing at Claude Code 2.1.295, 362 pass, and with 2.1.299, 362; none fail. They cover:
+- **372 automated tests** (`npm test`, Node's own runner, no dependencies, 44 to 52 seconds in the runs made for this README, most of it the PowerShell profile check; on Node 20 and newer `node --test` also reports each of the 3 helper files under `test/` as a passing test, so the runner's 375 is 372 without them). With `E2E_CLAUDE` unset, 356 pass and 16 are skipped: the 8 real-binary checks, and 8 that this machine cannot run (zsh, fish and PowerShell 7 are not installed; permission bits, named pipes and a read-only parent folder are POSIX only). With `E2E_CLAUDE` pointing at Claude Code 2.1.295, 364 pass, and with 2.1.299, 364; none fail. They cover:
   - the folder inventory and its kinds, the plan and every refusal;
   - a rename, the copy that `EXDEV` forces, a copy to a second drive, `--link`, and the `--xdg` split behind links;
   - profiles for bash, zsh, fish and PowerShell (quoting, line endings, a missing final line break, a byte-order mark, a file that is not UTF-8) and the Windows user environment (through a scratch registry key);

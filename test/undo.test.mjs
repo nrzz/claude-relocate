@@ -39,7 +39,7 @@ test("undo prints what it did and what to do next", async () => {
   await mv(w, ["--to", w.dest, "--no-env"]);
   const r = await undo(atDest(w));
   assert.equal(r.code, 0, r.all);
-  assert.match(r.out, /^claude-relocate 1\.0\.0 {2}undo$/m);
+  assert.match(r.out, /^claude-relocate 1\.1\.0 {2}undo$/m);
   assert.match(r.out, /^ {2}renamed .* to .*$/m);
   assert.match(r.out, /^Undone\. .* is back at .*$/m);
   assert.match(r.out, /^ {2}renamed, not copied: both are on the same drive$/m);

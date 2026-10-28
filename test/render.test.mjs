@@ -13,8 +13,8 @@ const emoji = /\p{Extended_Pictographic}/u;
 const moved = (over = {}) => ({ plan: { origin: { configDir: "/old/.claude" }, destination: { config: "/new/claude" } }, method: "rename", bytes: 16384, files: 30, stale: null, manifest: "/new/claude/relocate-manifest.json", warnings: [], incomplete: false, ...over });
 
 test("the header names the tool, its version and the command", () => {
-  assert.equal(header("verify", plain), "claude-relocate 1.0.0  verify");
-  assert.equal(header("verify", color), "\x1b[1mclaude-relocate 1.0.0\x1b[0m  verify");
+  assert.equal(header("verify", plain), "claude-relocate 1.1.0  verify");
+  assert.equal(header("verify", color), "\x1b[1mclaude-relocate 1.1.0\x1b[0m  verify");
 });
 
 test("renderMoved: what was moved, how, how much, where the manifest is, and the two next steps", () => {
@@ -90,7 +90,7 @@ test("renderVerify: one line per check with its level, the extra lines of a chec
     { id: "f", level: "ok", message: "3 sessions", lines: ["-p  2 sessions, newest 2026-10-01"] },
   ] };
   assert.equal(renderVerify(r, { c: plain }), [
-    "claude-relocate 1.0.0  verify",
+    "claude-relocate 1.1.0  verify",
     "  ok    fine",
     "  FAIL  broken",
     "  warn  odd",
@@ -143,7 +143,7 @@ test("renderPlan with colours: the header is bold, notes are yellow, problems re
   const sys = w.sys({ processes: () => ({ ok: true, processes: [{ pid: 1, name: "claude" }] }) });
   const model = buildPlan({ env: w.env, cwd: w.base, sys, opts: { to: w.dest } });
   const out = renderPlan(model, { c: color });
-  assert.ok(out.includes("\x1b[1mclaude-relocate 1.0.0\x1b[0m"));
+  assert.ok(out.includes("\x1b[1mclaude-relocate 1.1.0\x1b[0m"));
   assert.ok(out.includes("\x1b[33mnote\x1b[0m"));
   assert.ok(out.includes("\x1b[31m✗\x1b[0m"));
   assert.ok(out.includes("\x1b[2m  KIND"));

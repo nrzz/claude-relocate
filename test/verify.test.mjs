@@ -246,7 +246,7 @@ test("verify text ends with whether every check passed, and says terminals opene
   const w = fresh("vf13");
   await mv(w, ["--to", w.dest]);
   const ok = await run(["verify"], atDest(w), { sys: w.sys() });
-  assert.match(ok.out, /^claude-relocate 1\.0\.0 {2}verify$/m);
+  assert.match(ok.out, /^claude-relocate 1\.1\.0 {2}verify$/m);
   assert.match(ok.out, /^Every check passed\.$/m);
   assert.match(ok.out, /Terminals that were open before the move keep the old environment\.$/m);
   fs.rmSync(path.join(w.dest, ".claude.json"));

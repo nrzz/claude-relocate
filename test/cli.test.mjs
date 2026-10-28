@@ -28,7 +28,7 @@ test("--help and -h print the help on stdout and exit 0, wherever they are; --ve
   for (const argv of [["--help"], ["-h"], ["plan", "--help"], ["move", "-h", "--to", "x"], ["--no-color", "--help"]]) {
     const r = await run(argv, w);
     assert.equal(r.code, 0, argv.join(" "));
-    assert.match(r.out, /^claude-relocate 1\.0\.0: move Claude Code's config folder, sessions and \.claude\.json to another drive or into the XDG folders/);
+    assert.match(r.out, /^claude-relocate 1\.1\.0: move Claude Code's config folder, sessions and \.claude\.json to another drive or into the XDG folders/);
     assert.equal(r.err, "");
   }
   for (const argv of [["--version"], ["-v"], ["plan", "-v"]]) {
@@ -137,7 +137,7 @@ test("the program itself (bin/claude-relocate.mjs, a child process): version, he
   assert.deepEqual([v.code, v.out, v.err], [0, `${VERSION}\n`, ""]);
   const h = runCli(["--help"], { cwd: w.base, env: w.env });
   assert.equal(h.code, 0);
-  assert.match(h.out, /^claude-relocate 1\.0\.0: /);
+  assert.match(h.out, /^claude-relocate 1\.1\.0: /);
   const u = runCli(["plan", "--nope"], { cwd: w.base, env: w.env });
   assert.deepEqual([u.code, u.out], [2, ""]);
   assert.match(u.err, /^claude-relocate: unknown option --nope\n/);

@@ -1,6 +1,6 @@
 {
   "name": "claude-relocate",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Move Claude Code's config folder to another drive or into the XDG folders, safely: settings, sessions, the plugin cache and .claude.json move together, CLAUDE_CONFIG_DIR is set to match, and undo puts everything back. Zero tokens.",
   "type": "module",
   "bin": {

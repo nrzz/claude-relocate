@@ -40,7 +40,7 @@ test("move prints what it did, in plain sentences, and what to do next", async (
   const w = fresh("mv2");
   const r = await move(w, ["--to", w.dest, "--yes", "--no-env"]);
   assert.equal(r.code, 0, r.all);
-  assert.match(r.out, /^claude-relocate 1\.0\.0 {2}move$/m);
+  assert.match(r.out, /^claude-relocate 1\.1\.0 {2}move$/m);
   assert.match(r.out, /^ {2}renaming .* to .*$/m);
   assert.match(r.out, /^Moved .* to .*$/m);
   assert.match(r.out, /^ {2}renamed, not copied: both are on the same drive$/m);
