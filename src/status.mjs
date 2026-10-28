@@ -9,6 +9,7 @@ import { keyOf, readUserEnv } from "./winenv.mjs";
 
 export function runStatus({ env, cwd, sys }) {
   const cfg = configInUse(env, { cwd, platform: sys.platform });
+  const free = sys.free(cfg.dir);
   const found = findManifest(env, { cwd, sys });
   const M = found.found ? found.manifest : null;
   const profiles = readProfiles(env, { home: cfg.home, platform: sys.platform });
@@ -19,7 +20,7 @@ export function runStatus({ env, cwd, sys }) {
   const out = {
     schema: 1, tool: "claude-relocate", platform: sys.platform,
     thisTerminal: { variable: env.CLAUDE_CONFIG_DIR && env.CLAUDE_CONFIG_DIR.trim() ? env.CLAUDE_CONFIG_DIR : null, configDir: cfg.dir, source: cfg.source },
-    configDir: { path: cfg.dir, exists: there, isLink, resolvesTo: isLink && there ? safeReal(cfg.dir) : null },
+    configDir: { path: cfg.dir, exists: there, isLink, resolvesTo: isLink && there ? safeReal(cfg.dir) : null, freeBytes: typeof free === "number" ? free : null },
     claudeJson: { path: cfg.claudeJson, exists: !!jst, inside: cfg.claudeJsonInside, size: jst && jst.isFile() ? jst.size : null },
     moved: M ? { date: M.date, from: M.origin.configDir, to: M.destination.configDir, mode: M.mode, method: M.method, manifest: found.file, via: found.via } : null,
     links: (M ? M.links : []).map((l) => {

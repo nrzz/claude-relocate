@@ -24,6 +24,7 @@ export function renderPlan(model, { c }) {
   const lines = [header("what would move", c)];
   lines.push(`config folder   ${o.configDir}  (${o.source === "default" ? "the default: CLAUDE_CONFIG_DIR is not set" : "from CLAUDE_CONFIG_DIR"}${o.isLink ? `; a link${o.linkTarget ? ` to ${o.linkTarget}` : ""}` : ""}${!o.exists && !o.isLink ? "; it does not exist" : ""})`);
   lines.push(`.claude.json    ${o.claudeJson}  (${o.claudeJsonInside ? "inside the config folder, because CLAUDE_CONFIG_DIR is set" : "next to the config folder, because CLAUDE_CONFIG_DIR is not set"}${o.claudeJsonExists ? "" : "; it does not exist"})`);
+  if (typeof o.freeBytes === "number") lines.push(`free space      ${size(o.freeBytes)} on the drive of the config folder`);
   if (o.relocated) lines.push("                This folder is itself the destination of an earlier move (relocate-manifest.json is in it).");
   const T = model.destination;
   if (model.entries.length) {
@@ -146,6 +147,7 @@ export function renderStatus(s, { c }) {
   const lines = [header("status", c)];
   lines.push(`config folder   ${s.configDir.path}  (${s.thisTerminal.source === "default" ? "the default: CLAUDE_CONFIG_DIR is not set in this terminal" : "CLAUDE_CONFIG_DIR in this terminal"}${s.configDir.isLink ? (s.configDir.resolvesTo ? `; a link to ${s.configDir.resolvesTo}` : "; a link that leads nowhere") : s.configDir.exists ? "" : "; it does not exist"})`);
   lines.push(`.claude.json    ${s.claudeJson.path}  (${s.claudeJson.exists ? (s.claudeJson.size === null ? "a link" : size(s.claudeJson.size)) : "does not exist"}; ${s.claudeJson.inside ? "inside the config folder" : "next to the config folder"})`);
+  if (typeof s.configDir.freeBytes === "number") lines.push(`free space      ${size(s.configDir.freeBytes)} on the drive of the config folder`);
   if (s.moved) {
     lines.push(`moved           ${s.moved.from} to ${s.moved.to} on ${localDay(Date.parse(s.moved.date))} (${s.moved.mode === "xdg-split" ? "split into config, state and cache folders" : "one folder"}, by ${s.moved.method})`);
     lines.push(`                manifest: ${s.moved.manifest}`);
